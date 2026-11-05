@@ -39,18 +39,22 @@ const log = require('./lib/logger');
 const { handleStatus } = require('./lib/status');
 const { followChannel, handleChannelPost } = require('./lib/channel');
 const { postGroupStatus } = require('./lib/groupstatus');
-const { writeExifWebp } = require('./lib/sticker'); 
 const author = '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙';
 
 // ──────────────── EDIT HERE ────────────────
+// Your WhatsApp channel. Put the channel LINK (https://whatsapp.com/channel/XXXX) or, if you know it,
+// the channel id (1203630000000000@newsletter). The bot follows it on connect, auto-reacts to every new
+// post, and uses the same link for the menu's Channel button.
 const CHANNEL = {
     link: 'https://whatsapp.com/channel/0029Vb794NKBadmdwkPN6i0B',
-    jid: '', 
-    emojis: ['❤️', '🔥', '😍', '💯', '👏'], 
+    jid: '', // optional, e.g. '120363123456789012@newsletter' (skips the link lookup)
+    emojis: ['❤️', '🔥', '😍', '💯', '👏'], // one is picked at random for each post
 };
 const SUPPORT_URL = 'https://chat.whatsapp.com/';
 // ───────────────────────────────────────────
 
+// Commands grouped by category, purely for the .menu screen — the switch
+// below is the actual source of truth for what runs.
 const MENU_GROUPS = [
     { title: 'GENERAL', items: ['menu', 'ping', 'alive', 'owner', 'getdp', 'rvo', 'vv', 'runtime', 'stats'] },
     {
@@ -69,86 +73,73 @@ const MENU_GROUPS = [
     { title: 'TOOLS', items: ['tts', 'calc', 'password', 'donate'] },
 ];
 
-const DEFAULT_MENU_IMAGE = 'https://files.catbox.moe/6s94uf.jpeg';
-
-function menuImagePayload(value) {
-    if (/^https?:\/\//i.test(value)) return { url: value };
-    try {
-        return fs.readFileSync(value);
-    } catch {
-        return { url: DEFAULT_MENU_IMAGE };
-    }
-}
-
-// ──────────────── FULLY REWRITTEN MENU SYSTEM ────────────────
-function buildMenuText(session, category = 'main') {
+function buildMenuText(session, { withCommands = true } = {}) {
     const { settings } = session;
     const prefix = settings.get('prefix', config.prefix);
-    const name = botName(settings, config);
-    const mode = settings.get('public', true) ? 'Public' : 'Self';
-    const up = process.uptime();
-    const uptime = `${Math.floor(up / 3600)}h ${Math.floor((up % 3600) / 60)}m`;
+    const uptimeSec = process.uptime();
+    const uptime = `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m ${Math.floor(uptimeSec % 60)}s`;
+    const where = { all: '', gc: ' (groups only)', dm: ' (DMs only)' }[settings.get('workMode', 'all')] || '';
+    const mode = (settings.get('public', true) ? 'Public' : 'Self') + where;
+    const owners = settings.get('owners', []);
+    const ownerNum = owners[0] ? jidToNumber(owners[0]) : 'not set';
 
-    if (category === 'main') {
-        return `𝐇𝐄𝐋𝐋𝐎 👋 𝐓𝐇𝐀𝐍𝐊 𝐘𝐎𝐔 𝐅𝐎𝐑 𝐃𝐄𝐏𝐋𝐎𝐘𝐈𝐍𝐆\n亗 *${name.toUpperCase()}* 亗\n\n𝐔𝐒𝐄 𝐓𝐇𝐄 𝐁𝐔𝐓𝐓𝐎𝐍𝐒 𝐁𝐄𝐋𝐎𝐖 𝐓𝐎 𝐂𝐎𝐍𝐓𝐑𝐎𝐋 𝐓𝐇𝐄 𝐁𝐎𝐓.\n\n> *Prefix:* \`${prefix || 'none'}\`\n> *Mode:* ${mode}\n> *Uptime:* ${uptime}`;
-    }
+    const lines = [];
+    lines.push('┌─( *Bot Information*');
+    lines.push('│友 Bot Name ‹ ' + botName(settings, config));
+    lines.push('│友 Dev ‹  𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙');
+    lines.push('│友 version ‹ last');
+    lines.push('│友 Prefix ‹ ' + (prefix || 'none'));
+    lines.push('│友 Mode ‹ ' + mode);
+    lines.push('│友 Uptime ‹ ' + uptime);
+    lines.push('└────────────●');
+    lines.push('');
 
-    const group = MENU_GROUPS.find(g => g.title.toLowerCase() === category.toLowerCase());
-    if (group) {
-        let out = `亗 *${group.title} COMMANDS* 亗\n\n`;
-        for (const cmd of group.items) {
-            out += `╭─ \`${prefix}${cmd}\`\n`;
+    if (!withCommands) return lines.join('\n').trim();
+
+    for (const group of MENU_GROUPS) {
+        const cmds = group.items;
+        lines.push('┌─ ' + group.title);
+        for (let i = 0; i < cmds.length; i++) {
+            const branch = i === cmds.length - 1 ? '└─' : '├─';
+            lines.push(`│${branch}${prefix}${cmds[i]}`);
         }
-        out += `\n> _Type ${prefix}menu to go back_`;
-        return out;
+        lines.push('');
     }
-    return 'Menu not found.';
-}
 
-async function sendMenu(m, session, category = 'main', sock) {
+    return lines.join('\n').trim();
+    
+}
+async function sendMenu(m, session) {
     const { settings } = session;
-    const text = buildMenuText(session, category);
-    const prefix = settings.get('prefix', config.prefix);
+    const fullText = buildMenuText(session);
     const configuredImage = settings.get('menuImage') || DEFAULT_MENU_IMAGE;
 
-    // If user requested a specific category, send normally
-    if (category !== 'main') {
-        try {
-            return await m.send({ image: menuImagePayload(configuredImage), caption: text });
-        } catch (e) {
-            return m.reply(text);
-        }
-    }
-
-    // Main menu: Try to send with Interactive Buttons
+    // Send the menu as a normal WhatsApp image message. The previous code put
+    // `image` and `title` directly inside interactiveMessage; Baileys expects
+    // media in the interactive header, so WhatsApp displayed only the text.
     try {
-        await sock.sendMessage(m.from, {
+        return await m.send({
             image: menuImagePayload(configuredImage),
-            caption: text,
-            footer: '© JAMESMODZ',
-            buttons: [
-                { buttonId: `${prefix}menu general`, buttonText: { displayText: '🏠 GENERAL' }, type: 1 },
-                { buttonId: `${prefix}menu group`, buttonText: { displayText: '👥 GROUP' }, type: 1 },
-                { buttonId: `${prefix}menu owner`, buttonText: { displayText: '👑 OWNER' }, type: 1 },
-                { buttonId: `${prefix}menu downloads`, buttonText: { displayText: '📥 DOWNLOADS' }, type: 1 },
-                { buttonId: `${prefix}menu tools`, buttonText: { displayText: '🧰 TOOLS' }, type: 1 }
-            ],
-            headerType: 4
-        }, { quoted: m.raw });
+            caption: fullText,
+        });
     } catch (err) {
-        log.error('menu', `Interactive buttons failed: ${err.message}`);
-        
-        // FALLBACK: If buttons are not supported by your Baileys version/WhatsApp update, send as a numbered text menu
-        const fallbackText = `${text}\n\n*MENU CATEGORIES:*\n1. 🏠 GENERAL\n2. 👥 GROUP\n3. 👑 OWNER\n4. 📥 DOWNLOADS\n5. 🧰 TOOLS\n\n_Reply with the number (e.g., 1) or type ${prefix}menu group_`;
-        
-        try {
-            return await m.send({ image: menuImagePayload(configuredImage), caption: fallbackText });
-        } catch (fallbackErr) {
-            return m.reply(fallbackText);
+        log.error('menu', `configured menu image failed: ${err.message}`);
+        // Try the bundled default URL once before falling back to text.
+        if (configuredImage !== DEFAULT_MENU_IMAGE) {
+            try {
+                return await m.send({
+                    image: { url: DEFAULT_MENU_IMAGE },
+                    caption: fullText,
+                });
+            } catch (fallbackErr) {
+                log.error('menu', `default menu image failed: ${fallbackErr.message}`);
+            }
         }
+        return m.reply(fullText);
     }
 }
-// ───────────────────────────────────────────
+
+
 
 async function getQuotedMessage(m) {
     const ctx = m.raw.message?.[m.type]?.contextInfo;
@@ -159,6 +150,19 @@ async function getQuotedMessage(m) {
     };
 }
 
+const DEFAULT_MENU_IMAGE = 'https://files.catbox.moe/6s94uf.jpeg';
+
+/** A link, or a saved file; if the file is gone the default image is used so the menu always sends. */
+function menuImagePayload(value) {
+    if (/^https?:\/\//i.test(value)) return { url: value };
+    try {
+        return fs.readFileSync(value);
+    } catch {
+        return { url: DEFAULT_MENU_IMAGE };
+    }
+}
+
+/** on/off words -> true/false, anything else -> null (meaning "just show the status") */
 function parseSwitch(arg) {
     const a = String(arg || '').toLowerCase();
     if (['on', 'true', 'yes', 'enable', '1'].includes(a)) return true;
@@ -171,7 +175,7 @@ async function handleCommand(m, { args, sock, session }) {
     const { settings, sessionId } = session;
     const cmd = (m._cmd || '').toLowerCase();
     const owners = settings.get('owners', []);
-    const owner = isOwner(m, owners) || isSudo(m, settings);
+    const owner = isOwner(m, owners) || isSudo(m, settings); // sudo users get the owner's powers
     const P = settings.get('prefix', config.prefix);
     const isPublic = settings.get('public', true);
 
@@ -179,19 +183,12 @@ async function handleCommand(m, { args, sock, session }) {
 
     if (!isPublic && !owner) return;
 
-    // Handle Numbered Menu Selection (Fallback)
-    if (['1', '2', '3', '4', '5'].includes(cmd) && !m.isGroup) {
-        const map = { '1': 'general', '2': 'group', '3': 'owner', '4': 'downloads', '5': 'tools' };
-        if (map[cmd]) return sendMenu(m, session, map[cmd], sock);
-    }
-
     if (GROUP_CMDS.has(cmd)) return runGroupCommand(cmd, m, { sock, settings, owner, args, P, getQuotedMessage });
 
     switch (cmd) {
         case 'menu':
         case 'help':
-            const category = args[0] ? args[0].toLowerCase() : 'main';
-            return sendMenu(m, session, category, sock);
+            return sendMenu(m, session);
 
         case 'ping': {
             const start = Date.now();
@@ -246,6 +243,7 @@ async function handleCommand(m, { args, sock, session }) {
                 const imgMsg = quoted?.message?.imageMessage || m.raw.message?.imageMessage;
                 if (!imgMsg) return m.reply(`Reply to an image with *${P}setmenuimg*, send an image with it as the caption, or give a link:\n${P}setmenuimg https://...\n${P}setmenuimg reset`);
                 const buffer = await downloadMediaMessage({ message: { imageMessage: imgMsg }, key: quoted?.message?.imageMessage ? quoted.key : m.key }, 'buffer', {});
+                // inside the session folder (it survives panel updates and is removed with the session)
                 const dir = path.join(process.cwd(), 'session', sessionId);
                 fs.mkdirSync(dir, { recursive: true });
                 const dest = path.join(dir, 'menu-image.jpg');
@@ -771,179 +769,201 @@ async function handleCommand(m, { args, sock, session }) {
             }
         }
 
-        // ───────────────────────── media ─────────────────────────
-        case 'toimg':
-        case 'toimage': {
-            const quoted = await getQuotedMessage(m);
-            const st = quoted?.message?.stickerMessage || m.raw.message?.stickerMessage;
-            if (!st) return m.reply('Reply to a sticker with this command.');
-            try {
-                const buffer = await downloadMediaMessage(
-                    { message: { stickerMessage: st }, key: quoted?.key || m.key },
-                    'buffer',
-                    {}
-                );
-                return m.send({ image: buffer, caption: '✅ Converted to image' });
-            } catch (err) {
-                log.error('toimg', err.message);
-                return m.reply('❌ Failed to convert sticker.');
-            }
-        }
+        // ───────────────────────── protection 
+        
+            // ───────────────────────── media ─────────────────────────
+    
 
-        // ───────────────────────── text tools ─────────────────────────
-        case 'trt':
-        case 'translate': {
-            const text = args.join(' ').trim();
-            if (!text) return m.reply(`Usage: ${P}trt <text>  (auto → English)\n${P}trt <lang> <text>  e.g. ${P}trt fr hello`);
-            let lang = 'en', q = text;
-            const m2 = text.match(/^([a-z]{2,3})\s+(.+)$/i);
-            if (m2) { lang = m2[1].toLowerCase(); q = m2[2]; }
-            try {
-                await m.reply('🌐 Translating...');
-                const data = await apiGet(`/tools/translate?text=${encodeURIComponent(q)}&to=${lang}`);
-                const out = data?.result?.translated || data?.result?.text || data?.result;
-                if (!out) return m.reply('Translation failed.');
-                return m.reply(`🌐 *${lang.toUpperCase()}*\n${out}`);
-            } catch (err) {
-                log.error('trt', err.message);
-                return m.reply('❌ Translation error.');
-            }
-        }
-
-        case 'tts': {
-            const text = args.join(' ').trim();
-            if (!text) return m.reply(`Usage: ${P}tts <text>`);
-            try {
-                const data = await apiGet(`/tools/tts?text=${encodeURIComponent(text)}`);
-                const url = data?.result?.url || data?.result;
-                if (!url) return m.reply('TTS failed.');
-                return m.send({ audio: { url }, mimetype: 'audio/mpeg', ptt: true });
-            } catch (err) {
-                log.error('tts', err.message);
-                return m.reply('❌ TTS error.');
-            }
-        }
-
-        case 'lyrics': {
-            const q = args.join(' ').trim();
-            if (!q) return m.reply(`Usage: ${P}lyrics <song title>`);
-            try {
-                await m.reply('🎵 Searching lyrics...');
-                const data = await apiGet(`/search/lyrics?q=${encodeURIComponent(q)}`);
-                const r = data?.result;
-                if (!r) return m.reply('Lyrics not found.');
-                const cap = `🎶 *${r.title || q}*${r.artist ? `\n👤 ${r.artist}` : ''}\n\n${r.lyrics || r.text || ''}`;
-                return m.reply(cap.length > 6000 ? cap.slice(0, 6000) + '\n…' : cap);
-            } catch (err) {
-                log.error('lyrics', err.message);
-                return m.reply('❌ Could not fetch lyrics.');
-            }
-        }
-
-        case 'weather': {
-            const city = args.join(' ').trim();
-            if (!city) return m.reply(`Usage: ${P}weather <city>`);
-            try {
-                const data = await apiGet(`/tools/weather?q=${encodeURIComponent(city)}`);
-                const r = data?.result;
-                if (!r) return m.reply('City not found.');
-                return m.reply(`🌦️ *${r.location || city}*\n🌡️ ${r.temp ?? '-'}°C (feels ${r.feels ?? '-'}°C)\n☁️ ${r.desc || r.condition || '-'}\n💧 Humidity: ${r.humidity ?? '-'}%\n💨 Wind: ${r.wind ?? '-'}`);
-            } catch (err) {
-                log.error('weather', err.message);
-                return m.reply('❌ Weather lookup failed.');
-            }
-        }
-
-        // ───────────────────────── utility ─────────────────────────
-        case 'runtime':
-        case 'uptime': {
-            const s = process.uptime();
-            return m.reply(`⏱️ Uptime: ${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${Math.floor(s % 60)}s`);
-        }
-
-        case 'stats': {
-            const mem = process.memoryUsage();
-            const mb = (n) => (n / 1024 / 1024).toFixed(1) + ' MB';
-            return m.reply(
-                `📊 *${botName(settings, config)} stats*\n` +
-                `• Uptime: ${Math.floor(process.uptime() / 60)} min\n` +
-                `• RSS: ${mb(mem.rss)}\n• Heap: ${mb(mem.heapUsed)} / ${mb(mem.heapTotal)}\n` +
-                `• Node: ${process.version}\n• Platform: ${process.platform}`
+    case 'toimg':
+    case 'toimage': {
+        const quoted = await getQuotedMessage(m);
+        const st = quoted?.message?.stickerMessage || m.raw.message?.stickerMessage;
+        if (!st) return m.reply('Reply to a sticker with this command.');
+        try {
+            const buffer = await downloadMediaMessage(
+                { message: { stickerMessage: st }, key: quoted?.key || m.key },
+                'buffer',
+                {}
             );
+            return m.send({ image: buffer, caption: '✅ Converted to image' });
+        } catch (err) {
+            log.error('toimg', err.message);
+            return m.reply('❌ Failed to convert sticker.');
         }
+    }
 
-        case 'calc': {
-            const expr = args.join(' ').trim();
-            if (!expr) return m.reply(`Usage: ${P}calc <expression>`);
-            if (!/^[\d\s+\-*/().%]+$/.test(expr)) return m.reply('❌ Only numbers and + - * / ( ) % allowed.');
-            try {
-                const val = Function(`"use strict";return (${expr})`)();
-                return m.reply(`🧮 ${expr} = *${val}*`);
-            } catch {
-                return m.reply('❌ Invalid expression.');
+    // ───────────────────────── text tools ─────────────────────────
+    case 'trt':
+    case 'translate': {
+        const text = args.join(' ').trim();
+        if (!text) return m.reply(`Usage: ${P}trt <text>  (auto → English)\n${P}trt <lang> <text>  e.g. ${P}trt fr hello`);
+        let lang = 'en', q = text;
+        const m2 = text.match(/^([a-z]{2,3})\s+(.+)$/i);
+        if (m2) { lang = m2[1].toLowerCase(); q = m2[2]; }
+        try {
+            await m.reply('🌐 Translating...');
+            const data = await apiGet(`/tools/translate?text=${encodeURIComponent(q)}&to=${lang}`);
+            const out = data?.result?.translated || data?.result?.text || data?.result;
+            if (!out) return m.reply('Translation failed.');
+            return m.reply(`🌐 *${lang.toUpperCase()}*\n${out}`);
+        } catch (err) {
+            log.error('trt', err.message);
+            return m.reply('❌ Translation error.');
+        }
+    }
+
+    case 'tts': {
+        const text = args.join(' ').trim();
+        if (!text) return m.reply(`Usage: ${P}tts <text>`);
+        try {
+            const data = await apiGet(`/tools/tts?text=${encodeURIComponent(text)}`);
+            const url = data?.result?.url || data?.result;
+            if (!url) return m.reply('TTS failed.');
+            return m.send({ audio: { url }, mimetype: 'audio/mpeg', ptt: true });
+        } catch (err) {
+            log.error('tts', err.message);
+            return m.reply('❌ TTS error.');
+        }
+    }
+
+    case 'lyrics': {
+        const q = args.join(' ').trim();
+        if (!q) return m.reply(`Usage: ${P}lyrics <song title>`);
+        try {
+            await m.reply('🎵 Searching lyrics...');
+            const data = await apiGet(`/search/lyrics?q=${encodeURIComponent(q)}`);
+            const r = data?.result;
+            if (!r) return m.reply('Lyrics not found.');
+            const cap = `🎶 *${r.title || q}*${r.artist ? `\n👤 ${r.artist}` : ''}\n\n${r.lyrics || r.text || ''}`;
+            return m.reply(cap.length > 6000 ? cap.slice(0, 6000) + '\n…' : cap);
+        } catch (err) {
+            log.error('lyrics', err.message);
+            return m.reply('❌ Could not fetch lyrics.');
+        }
+    }
+
+    case 'weather': {
+        const city = args.join(' ').trim();
+        if (!city) return m.reply(`Usage: ${P}weather <city>`);
+        try {
+            const data = await apiGet(`/tools/weather?q=${encodeURIComponent(city)}`);
+            const r = data?.result;
+            if (!r) return m.reply('City not found.');
+            return m.reply(`🌦️ *${r.location || city}*\n🌡️ ${r.temp ?? '-'}°C (feels ${r.feels ?? '-'}°C)\n☁️ ${r.desc || r.condition || '-'}\n💧 Humidity: ${r.humidity ?? '-'}%\n💨 Wind: ${r.wind ?? '-'}`);
+        } catch (err) {
+            log.error('weather', err.message);
+            return m.reply('❌ Weather lookup failed.');
+        }
+    }
+
+    // ───────────────────────── utility ─────────────────────────
+    case 'runtime':
+    case 'uptime': {
+        const s = process.uptime();
+        return m.reply(`⏱️ Uptime: ${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${Math.floor(s % 60)}s`);
+    }
+
+    case 'stats': {
+        const mem = process.memoryUsage();
+        const mb = (n) => (n / 1024 / 1024).toFixed(1) + ' MB';
+        return m.reply(
+            `📊 *${botName(settings, config)} stats*\n` +
+            `• Uptime: ${Math.floor(process.uptime() / 60)} min\n` +
+            `• RSS: ${mb(mem.rss)}\n• Heap: ${mb(mem.heapUsed)} / ${mb(mem.heapTotal)}\n` +
+            `• Node: ${process.version}\n• Platform: ${process.platform}`
+        );
+    }
+
+    case 'calc': {
+        const expr = args.join(' ').trim();
+        if (!expr) return m.reply(`Usage: ${P}calc <expression>`);
+        if (!/^[\d\s+\-*/().%]+$/.test(expr)) return m.reply('❌ Only numbers and + - * / ( ) % allowed.');
+        try {
+            // eslint-disable-next-line no-new-func
+            const val = Function(`"use strict";return (${expr})`)();
+            return m.reply(`🧮 ${expr} = *${val}*`);
+        } catch {
+            return m.reply('❌ Invalid expression.');
+        }
+    }
+
+    case 'password': {
+        const len = Math.min(Math.max(parseInt(args[0], 10) || 16, 6), 64);
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=';
+        let out = '';
+        const crypto = require('crypto');
+        for (let i = 0; i < len; i++) out += chars[crypto.randomInt(0, chars.length)];
+        return m.reply(`🔐 Password (${len}):\n\`${out}\``);
+    }
+
+    case 'qr': {
+        const text = args.join(' ').trim();
+        if (!text) return m.reply(`Usage: ${P}qr <text or url>`);
+        const url = `https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(text)}`;
+        return m.send({ image: { url }, caption: '🔳 QR Code' });
+    }
+
+    // ───────────────────────── owner ─────────────────────────
+    case 'restart': {
+        if (!owner) return m.reply('⛔ Owner only.');
+        await m.reply('♻️ Restarting...');
+        process.exit(0); // panel/pm2 should restart automatically
+    }
+
+    case 'broadcast': {
+        if (!owner) return m.reply('⛔ Owner only.');
+        const text = args.join(' ').trim();
+        if (!text) return m.reply(`Usage: ${P}broadcast <message>`);
+        try {
+            const groups = await sock.groupFetchAllParticipating();
+            let n = 0;
+            for (const jid of Object.keys(groups)) {
+                try { await sock.sendMessage(jid, { text }); n++; } catch {}
             }
+            return m.reply(`📢 Broadcast sent to ${n} group(s).`);
+        } catch (err) {
+            log.error('broadcast', err.message);
+            return m.reply('❌ Broadcast failed.');
         }
+    }
 
-        case 'password': {
-            const len = Math.min(Math.max(parseInt(args[0], 10) || 16, 6), 64);
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=';
-            let out = '';
-            const crypto = require('crypto');
-            for (let i = 0; i < len; i++) out += chars[crypto.randomInt(0, chars.length)];
-            return m.reply(`🔐 Password (${len}):\n\`${out}\``);
-        }
+    
+case 'report': {
+    if (!owners.length) return m.reply('No owner configured.');
 
-        case 'qr': {
-            const text = args.join(' ').trim();
-            if (!text) return m.reply(`Usage: ${P}qr <text or url>`);
-            const url = `https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(text)}`;
-            return m.send({ image: { url }, caption: '🔳 QR Code' });
-        }
+    const text = args.join(' ').trim();
+    if (!text) return m.reply(`Usage: ${P}report <message>`);
 
-        // ───────────────────────── owner ─────────────────────────
-        case 'restart': {
-            if (!owner) return m.reply('⛔ Owner only.');
-            await m.reply('♻️ Restarting...');
-            process.exit(0);
-        }
+    const to = owners[0];
 
-        case 'broadcast': {
-            if (!owner) return m.reply('⛔ Owner only.');
-            const text = args.join(' ').trim();
-            if (!text) return m.reply(`Usage: ${P}broadcast <message>`);
-            try {
-                const groups = await sock.groupFetchAllParticipating();
-                let n = 0;
-                for (const jid of Object.keys(groups)) {
-                    try { await sock.sendMessage(jid, { text }); n++; } catch {}
-                }
-                return m.reply(`📢 Broadcast sent to ${n} group(s).`);
-            } catch (err) {
-                log.error('broadcast', err.message);
-                return m.reply('❌ Broadcast failed.');
-            }
-        }
+    // Prefer the real phone-number JID over a LID
+    const senderJid = m.senderAlt || m.sender;
+    const senderNumber = jidToNumber(senderJid);
 
-        case 'report': {
-            if (!owners.length) return m.reply('No owner configured.');
-            const text = args.join(' ').trim();
-            if (!text) return m.reply(`Usage: ${P}report <message>`);
-            const to = owners[0];
-            const senderJid = m.senderAlt || m.sender;
-            const senderNumber = jidToNumber(senderJid);
-            try {
-                await sock.sendMessage(to, {
-                    text: `📩 *NEW BOT REPORT*\n\n👤 *Sender:* ${senderNumber}\n📱 *WhatsApp:* https://wa.me/${senderNumber}\n\n━━━━━━━━━━━━━━\n📝 *Message:*\n${text}\n━━━━━━━━━━━━━━`
-                });
-                return m.reply('✅ Report sent to the owner.');
-            } catch (err) {
-                console.error('Report error:', err);
-                return m.reply('❌ Could not send the report.');
-            }
-        }
+    try {
+        await sock.sendMessage(to, {
+            text: `📩 *NEW BOT REPORT*
 
-        case 'donate': {
-            return m.reply(`
+👤 *Sender:* ${senderNumber}
+📱 *WhatsApp:* https://wa.me/${senderNumber}
+
+━━━━━━━━━━━━━━
+📝 *Message:*
+${text}
+━━━━━━━━━━━━━━`
+        });
+
+        return m.reply('✅ Report sent to the owner.');
+    } catch (err) {
+        console.error('Report error:', err);
+        return m.reply('❌ Could not send the report.');
+    }
+}
+
+
+    
+case 'donate': {
+    return m.reply(`
 ╭━━〔 ☕ DONATE & SUPPORT 〕━━╮
 ┃
 ┃  ✨ *SUPPORT ${botName(settings, config)}*
@@ -963,51 +983,122 @@ async function handleCommand(m, { args, sock, session }) {
 
 _© ${botName(settings, config)}_
 `.trim());
+}
+break;
+
+
+case 'enc':
+case 'encrypt': {
+    const JsConfuser = require('js-confuser');
+
+    const quoted = m.quoted;
+
+    if (!quoted) {
+        return m.reply('❌ Reply to a JavaScript (.js) file.');
+    }
+
+    const fileName = quoted.fileName || quoted.msg?.fileName || '';
+
+    if (!fileName.toLowerCase().endsWith('.js')) {
+        return m.reply('❌ Only .js files are supported.');
+    }
+
+    try {
+        await sock.sendMessage(m.chat, {
+            react: { text: '⏳', key: m.key }
+        });
+
+        const docBuffer = await quoted.download();
+
+        if (!docBuffer) {
+            return m.reply('❌ Failed to download the file.');
         }
 
-        case 'enc':
-        case 'encrypt': {
-            const JsConfuser = require('js-confuser');
-            const quoted = m.quoted;
-            if (!quoted) return m.reply('❌ Reply to a JavaScript (.js) file.');
-            const fileName = quoted.fileName || quoted.msg?.fileName || '';
-            if (!fileName.toLowerCase().endsWith('.js')) return m.reply('❌ Only .js files are supported.');
-            try {
-                await sock.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
-                const docBuffer = await quoted.download();
-                if (!docBuffer) return m.reply('❌ Failed to download the file.');
-                const result = await JsConfuser.obfuscate(docBuffer.toString('utf-8'), {
-                    target: 'node', preset: 'high', compact: true, minify: true, flatten: true,
-                    identifierGenerator: function () {
-                        const originalString = 'SMILEMODZ';
-                        const randomString = (length) => {
-                            let result = '';
-                            const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-                            for (let i = 0; i < length; i++) result += characters.charAt(Math.floor(Math.random() * characters.length));
-                            return result;
-                        };
-                        return originalString + randomString(2);
-                    },
-                    renameVariables: true, renameGlobals: false, stringEncoding: true, stringSplitting: 0.0,
-                    stringConcealing: true, stringCompression: true, duplicateLiteralsRemoval: 1.0, controlFlowFlattening: 1.0,
-                    opaquePredicates: 0.9, deadCode: 0.0, dispatcher: true, calculator: true, hexadecimalNumbers: true,
-                    movedDeclarations: true, objectExtraction: true, globalConcealing: true
-                });
-                const output = result.code || result;
-                await sock.sendMessage(m.chat, {
-                    document: Buffer.from(output, 'utf-8'),
-                    mimetype: 'application/javascript',
-                    fileName: `SHADOW-${fileName}`,
-                    caption: `\n╭━━〔 亗 SHADOW MD 亗 〕━━╮\n┃\n┃  🔐 ENCRYPTION SUCCESSFUL\n┃\n┃  📁 File: ${fileName}\n┃  🛡️ Protection: HIGH\n┃\n┃  👨‍💻 DEVELOPER\n┃  𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n            `.trim()
-                }, { quoted: m });
-                await sock.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-            } catch (err) {
-                console.error('SHADOW ENCRYPT ERROR:', err);
-                return m.reply(`❌ Encryption failed: ${err.message}`);
+        const result = await JsConfuser.obfuscate(
+            docBuffer.toString('utf-8'),
+            {
+                target: 'node',
+                preset: 'high',
+                compact: true,
+                minify: true,
+                flatten: true,
+
+                identifierGenerator: function () {
+                    const originalString = 'SMILEMODZ';
+                    const randomString = (length) => {
+                        let result = '';
+                        const characters =
+                            'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+                        for (let i = 0; i < length; i++) {
+                            result += characters.charAt(
+                                Math.floor(Math.random() * characters.length)
+                            );
+                        }
+
+                        return result;
+                    };
+
+                    return originalString + randomString(2);
+                },
+
+                renameVariables: true,
+                renameGlobals: false,
+                stringEncoding: true,
+                stringSplitting: 0.0,
+                stringConcealing: true,
+                stringCompression: true,
+                duplicateLiteralsRemoval: 1.0,
+                controlFlowFlattening: 1.0,
+                opaquePredicates: 0.9,
+                deadCode: 0.0,
+                dispatcher: true,
+                calculator: true,
+                hexadecimalNumbers: true,
+                movedDeclarations: true,
+                objectExtraction: true,
+                globalConcealing: true
             }
-            break;
-        }
+        );
 
+        const output = result.code || result;
+
+        await sock.sendMessage(m.chat, {
+            document: Buffer.from(output, 'utf-8'),
+            mimetype: 'application/javascript',
+            fileName: `SHADOW-${fileName}`,
+            caption: `
+╭━━〔 亗 SHADOW MD 亗 〕━━╮
+┃
+┃  🔐 ENCRYPTION SUCCESSFUL
+┃
+┃  📁 File: ${fileName}
+┃  🛡️ Protection: HIGH
+┃
+┃  👨‍💻 DEVELOPER
+┃  𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙
+┃
+╰━━━━━━━━━━━━━━━━━━╯
+            `.trim()
+        }, { quoted: m });
+
+        await sock.sendMessage(m.chat, {
+            react: { text: '✅', key: m.key }
+        });
+
+    } catch (err) {
+        console.error('SHADOW ENCRYPT ERROR:', err);
+        return m.reply(`❌ Encryption failed: ${err.message}`);
+    }
+
+    break;
+}
+
+
+
+        
+        
+        
         //─────────────────────────
         case 'antilink': {
             if (!(await requireGroup(m))) return;
@@ -1073,45 +1164,123 @@ _© ${botName(settings, config)}_
             settings.set('antiCall', a);
             return m.reply(a === 'off' ? '✅ Anti-call *OFF*.' : `✅ Anti-call *${a.toUpperCase()}* — ${a === 'hang' ? 'calls are rejected' : 'callers are rejected and blocked'} (owner and sudo are never affected).`);
         }
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
 
         // ───────────────────────── automation 
-        case 'sticker':
-        case 'stiker':
-        case 's': {
-            try {
-                const quoted = await getQuotedMessage(m);
-                const msg = quoted?.message || m.raw?.message;
-                if (!msg) return m.reply('📸 Reply to an image or short video to create a sticker.');
-                const media = msg.imageMessage || msg.videoMessage || msg.stickerMessage;
-                if (!media) return m.reply('❌ Reply to an image, video or sticker.');
-                if (msg.videoMessage && Number(msg.videoMessage.seconds || 0) > 10) return m.reply('❌ Video must be 10 seconds or shorter.');
-                await m.reply('⏳ Creating sticker...');
-                const buffer = await downloadMediaMessage({ message: msg, key: quoted?.key || m.key }, 'buffer', {});
-                await sock.sendMessage(m.chat, { sticker: buffer }, { quoted: m.raw });
-            } catch (err) {
-                log.error('sticker', err.message);
-                return m.reply('❌ Failed to create sticker. Try another image or video.');
-            }
-            break;
-        }   
-
-        case 'take':
-        case 'steal': {
-            try {
-                const quoted = await getQuotedMessage(m);
-                const sticker = quoted?.message?.stickerMessage;
-                if (!sticker) return m.reply('❌ Reply to a sticker with .take');
-                await m.reply('⏳ Updating sticker metadata...');
-                const buffer = await downloadMediaMessage({ message: { stickerMessage: sticker }, key: quoted.key }, 'buffer', {});
-                const stickerBuffer = await writeExifWebp(buffer, { packname: '', author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙' });
-                await sock.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m.raw });
-            } catch (err) {
-                log.error('take', err);
-                return m.reply('❌ Failed to update sticker metadata.');
-            }
-            break;
-        }   
         
+     case 'sticker':
+case 'stiker':
+case 's': {
+    try {
+        const quoted = await getQuotedMessage(m);
+        const msg = quoted?.message || m.raw?.message;
+
+        if (!msg) {
+            return m.reply('📸 Reply to an image or short video to create a sticker.');
+        }
+
+        const media =
+            msg.imageMessage ||
+            msg.videoMessage ||
+            msg.stickerMessage;
+
+        if (!media) {
+            return m.reply('❌ Reply to an image, video or sticker.');
+        }
+
+        if (msg.videoMessage && Number(msg.videoMessage.seconds || 0) > 10) {
+            return m.reply('❌ Video must be 10 seconds or shorter.');
+        }
+
+        await m.reply('⏳ Creating sticker...');
+
+        const buffer = await downloadMediaMessage(
+            {
+                message: msg,
+                key: quoted?.key || m.key
+            },
+            'buffer',
+            {}
+        );
+
+        await sock.sendMessage(
+            m.chat,
+            {
+                sticker: buffer
+            },
+            {
+                quoted: m.raw
+            }
+        );
+
+    } catch (err) {
+        log.error('sticker', err.message);
+        return m.reply('❌ Failed to create sticker. Try another image or video.');
+    }
+
+    break;
+}   
+
+
+     case 'take':
+case 'steal': {
+    try {
+        const quoted = await getQuotedMessage(m);
+        const sticker = quoted?.message?.stickerMessage;
+
+        if (!sticker) {
+            return m.reply('❌ Reply to a sticker with .take');
+        }
+
+        await m.reply('⏳ Updating sticker metadata...');
+
+        const buffer = await downloadMediaMessage(
+            {
+                message: { stickerMessage: sticker },
+                key: quoted.key
+            },
+            'buffer',
+            {}
+        );
+
+        const stickerBuffer = await writeExifWebp(
+            buffer,
+            {
+                packname: '',
+                author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙'
+            }
+        );
+
+        await sock.sendMessage(
+            m.chat,
+            { sticker: stickerBuffer },
+            { quoted: m.raw }
+        );
+
+    } catch (err) {
+        log.error('take', err);
+        return m.reply('❌ Failed to update sticker metadata.');
+    }
+    break;
+}   
+        
+        
+        
+        
+        
+        
+        // ─────────────────────────
         case 'autoreply':
         case 'autotype':
         case 'autorecord':
@@ -1133,7 +1302,7 @@ _© ${botName(settings, config)}_
             }
             settings.set(key, v);
             if (v && ['autoType', 'autoRecord', 'autoRecordType'].includes(key)) {
-                for (const other of ['autoType', 'autoRecord', 'autoRecordType']) if (other !== key) settings.set(other, false); 
+                for (const other of ['autoType', 'autoRecord', 'autoRecordType']) if (other !== key) settings.set(other, false); // one presence style at a time
             }
             if (key === 'alwaysOnline') {
                 if (v) {
@@ -1152,6 +1321,8 @@ _© ${botName(settings, config)}_
             const text = args.join(' ').trim();
             const quoted = await getQuotedMessage(m);
             const qm = quoted?.message || {};
+
+            // media: attached to this very command, or the message you replied to
             const sources = [
                 { msg: m.raw.message, key: m.raw.key, own: true },
                 ...(quoted ? [{ msg: qm, key: quoted.key }] : []),
@@ -1195,12 +1366,14 @@ _© ${botName(settings, config)}_
 }
 
 
+/** AI auto-reply for messages that are not commands. */
 async function maybeChatbot(m, { sock, settings, sessionId, owner }) {
     if (!settings.get('autoReply', false) || m.fromMe || !m.body || m.body.length > 600) return;
     if (!settings.get('public', true) && !owner) return;
     if (!['conversation', 'extendedTextMessage'].includes(m.type)) return;
 
     if (m.isGroup) {
+        // in groups only when the bot is @mentioned or replied to
         const ctx = m.raw.message?.[m.type]?.contextInfo;
         const mine = ownNums(sock);
         const mentioned = (ctx?.mentionedJid || []).some((j) => mine.includes(numOf(j)));
@@ -1209,7 +1382,7 @@ async function maybeChatbot(m, { sock, settings, sessionId, owner }) {
     }
     if (!chatAllowed(m.from)) return;
 
-    const text = m.body.replace(/@\d{6,}/g, '').trim(); 
+    const text = m.body.replace(/@\d{6,}/g, '').trim(); // drop the @mention itself
     if (!text) return;
     try {
         sock.sendPresenceUpdate('composing', m.from).catch(() => {});
@@ -1228,30 +1401,32 @@ async function handleMessages(sock, { messages, type }, session) {
 
     for (const raw of messages) {
         try {
-            if (handleStatus(sock, raw, settings)) continue; 
-            if (handleChannelPost(sock, raw, CHANNEL, settings)) continue; 
-            if (await handleRevoke(sock, sessionId, raw, settings)) continue; 
+            if (handleStatus(sock, raw, settings)) continue; // status@broadcast: auto view / like
+            if (handleChannelPost(sock, raw, CHANNEL, settings)) continue; // channel post: auto react
+            if (await handleRevoke(sock, sessionId, raw, settings)) continue; // someone deleted a message (anti-delete)
             const pm = raw.message?.protocolMessage;
             if (pm?.editedMessage && raw.key.remoteJid?.endsWith('@g.us')) {
+                // a message was EDITED: if it now contains a link, remove it (the classic antilink bypass)
                 const who = { fromMe: !!raw.key.fromMe, sender: raw.key.participant, senderAlt: raw.key.participantAlt || raw.key.participantPn };
                 const own = isOwner(who, settings.get('owners', [])) || isSudo(who, settings);
                 await checkEditedLink(sock, raw, settings, own);
                 continue;
             }
-            await rememberMessage(sock, sessionId, raw, settings); 
+            await rememberMessage(sock, sessionId, raw, settings); // keep it in case it gets deleted
 
             const m = serializeMessage(sock, raw, settings);
             if (!m) continue;
 
             const owner = isOwner(m, settings.get('owners', [])) || isSudo(m, settings);
 
+            // gatekeeping: banned people and the "works in groups / DMs only" mode (owner + sudo are exempt)
             if (!owner && isBanned(m, settings)) continue;
             const workMode = settings.get('workMode', 'all');
             if (!owner && ((workMode === 'gc' && !m.isGroup) || (workMode === 'dm' && m.isGroup))) continue;
 
-            if (!m.fromMe) simulatePresence(sock, m.from, settings); 
+            if (!m.fromMe) simulatePresence(sock, m.from, settings); // autotype / autorecord
 
-            if (await checkAntilink(m, { sock, settings, owner })) continue; 
+            if (await checkAntilink(m, { sock, settings, owner })) continue; // link posted in a protected group
 
             const prefix = settings.get('prefix', config.prefix);
             if (!m.body) continue;
@@ -1265,7 +1440,7 @@ async function handleMessages(sock, { messages, type }, session) {
 
             const [cmdName, ...args] = (withoutPrefix || '').split(/\s+/);
             if (withoutPrefix === null || !cmdName) {
-                await maybeChatbot(m, { sock, settings, sessionId, owner }); 
+                await maybeChatbot(m, { sock, settings, sessionId, owner }); // not a command: chat with the AI if enabled
                 continue;
             }
 
@@ -1277,6 +1452,7 @@ async function handleMessages(sock, { messages, type }, session) {
     }
 }
 
+/** Incoming calls: reject (and optionally block) unless the caller is an owner / sudo user. */
 async function handleCalls(sock, calls, session) {
     const { settings } = session;
     const mode = settings.get('antiCall', 'off');
@@ -1297,10 +1473,12 @@ async function handleCalls(sock, calls, session) {
     }
 }
 
+/** Someone joined / left a group: welcome / goodbye message. */
 async function handleGroupUpdate(sock, update, session) {
     await handleParticipants(sock, update, session.settings);
 }
 
+/** Runs once each time a session's connection opens. */
 async function onSessionOpen(sock, session) {
     if (session?.settings) startAlwaysOnline(sock, session.settings);
     await followChannel(sock, CHANNEL);
