@@ -1178,102 +1178,34 @@ case 'encrypt': {
         
 
         // ───────────────────────── automation 
-        
-     case 'sticker':
-case 'stiker':
+        case 'sticker':
 case 's': {
     try {
         const quoted = await getQuotedMessage(m);
-        const msg = quoted?.message || m.raw?.message;
-
-        if (!msg) {
-            return m.reply('📸 Reply to an image or short video to create a sticker.');
+        if (!quoted) {
+            return m.reply('Reply to an image with .sticker');
         }
-
-        const media =
-            msg.imageMessage ||
-            msg.videoMessage ||
-            msg.stickerMessage;
-
-        if (!media) {
-            return m.reply('❌ Reply to an image, video or sticker.');
-        }
-
-        if (msg.videoMessage && Number(msg.videoMessage.seconds || 0) > 10) {
-            return m.reply('❌ Video must be 10 seconds or shorter.');
-        }
-
-        await m.reply('⏳ Creating sticker...');
-
         const buffer = await downloadMediaMessage(
-            {
-                message: msg,
-                key: quoted?.key || m.key
-            },
+            quoted,
             'buffer',
-            {}
+            {},
+            { logger: log }
         );
+        await sock.sendMessage(m.chat, {
+            sticker: buffer,
+            author: ' 𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙',
+        }, { quoted: m.raw });
 
-        await sock.sendMessage(
-            m.chat,
-            {
-                sticker: buffer
-            },
-            {
-                quoted: m.raw
-            }
-        );
-
-    } catch (err) {
-        log.error('sticker', err.message);
-        return m.reply('❌ Failed to create sticker. Try another image or video.');
+    } catch (error) {
+        log.error('sticker', error.message);
+        return m.reply('Failed to create sticker.');
     }
+}
+break;
+     
 
-    break;
-}   
 
-
-     case 'take':
-case 'steal': {
-    try {
-        const quoted = await getQuotedMessage(m);
-        const sticker = quoted?.message?.stickerMessage;
-
-        if (!sticker) {
-            return m.reply('❌ Reply to a sticker with .take');
-        }
-
-        await m.reply('⏳ Updating sticker metadata...');
-
-        const buffer = await downloadMediaMessage(
-            {
-                message: { stickerMessage: sticker },
-                key: quoted.key
-            },
-            'buffer',
-            {}
-        );
-
-        const stickerBuffer = await writeExifWebp(
-            buffer,
-            {
-                packname: '',
-                author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙'
-            }
-        );
-
-        await sock.sendMessage(
-            m.chat,
-            { sticker: stickerBuffer },
-            { quoted: m.raw }
-        );
-
-    } catch (err) {
-        log.error('take', err);
-        return m.reply('❌ Failed to update sticker metadata.');
-    }
-    break;
-}   
+     
         
         
         
