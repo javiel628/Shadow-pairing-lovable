@@ -39,7 +39,7 @@ const log = require('./lib/logger');
 const { handleStatus } = require('./lib/status');
 const { followChannel, handleChannelPost } = require('./lib/channel');
 const { postGroupStatus } = require('./lib/groupstatus');
-const { writeExifWebp } = require('./lib/sticker'); // Added this import to prevent .take crashes
+const { writeExifWebp } = require('./lib/sticker'); 
 const author = '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙';
 
 // ──────────────── EDIT HERE ────────────────
@@ -69,7 +69,18 @@ const MENU_GROUPS = [
     { title: 'TOOLS', items: ['tts', 'calc', 'password', 'donate'] },
 ];
 
-// ──────────────── NEW MENU BUILDER ────────────────
+const DEFAULT_MENU_IMAGE = 'https://files.catbox.moe/6s94uf.jpeg';
+
+function menuImagePayload(value) {
+    if (/^https?:\/\//i.test(value)) return { url: value };
+    try {
+        return fs.readFileSync(value);
+    } catch {
+        return { url: DEFAULT_MENU_IMAGE };
+    }
+}
+
+// ──────────────── FULLY REWRITTEN MENU SYSTEM ────────────────
 function buildMenuText(session, category = 'main') {
     const { settings } = session;
     const prefix = settings.get('prefix', config.prefix);
@@ -78,12 +89,10 @@ function buildMenuText(session, category = 'main') {
     const up = process.uptime();
     const uptime = `${Math.floor(up / 3600)}h ${Math.floor((up % 3600) / 60)}m`;
 
-    // 1. MAIN DASHBOARD MENU (When user types .menu)
     if (category === 'main') {
         return `𝐇𝐄𝐋𝐋𝐎 👋 𝐓𝐇𝐀𝐍𝐊 𝐘𝐎𝐔 𝐅𝐎𝐑 𝐃𝐄𝐏𝐋𝐎𝐘𝐈𝐍𝐆\n亗 *${name.toUpperCase()}* 亗\n\n𝐔𝐒𝐄 𝐓𝐇𝐄 𝐁𝐔𝐓𝐓𝐎𝐍𝐒 𝐁𝐄𝐋𝐎𝐖 𝐓𝐎 𝐂𝐎𝐍𝐓𝐑𝐎𝐋 𝐓𝐇𝐄 𝐁𝐎𝐓.\n\n> *Prefix:* \`${prefix || 'none'}\`\n> *Mode:* ${mode}\n> *Uptime:* ${uptime}`;
     }
 
-    // 2. SPECIFIC CATEGORY MENU (When user taps a button)
     const group = MENU_GROUPS.find(g => g.title.toLowerCase() === category.toLowerCase());
     if (group) {
         let out = `亗 *${group.title} COMMANDS* 亗\n\n`;
@@ -93,17 +102,16 @@ function buildMenuText(session, category = 'main') {
         out += `\n> _Type ${prefix}menu to go back_`;
         return out;
     }
-
     return 'Menu not found.';
 }
 
-async function sendMenu(m, session, category = 'main') {
+async function sendMenu(m, session, category = 'main', sock) {
     const { settings } = session;
     const text = buildMenuText(session, category);
     const prefix = settings.get('prefix', config.prefix);
     const configuredImage = settings.get('menuImage') || DEFAULT_MENU_IMAGE;
 
-    // If user requested a specific category, just send text
+    // If user requested a specific category, send normally
     if (category !== 'main') {
         try {
             return await m.send({ image: menuImagePayload(configuredImage), caption: text });
@@ -112,12 +120,12 @@ async function sendMenu(m, session, category = 'main') {
         }
     }
 
-    // If MAIN menu, send with BUTTONS
+    // Main menu: Try to send with Interactive Buttons
     try {
-        await m.send({
+        await sock.sendMessage(m.from, {
             image: menuImagePayload(configuredImage),
             caption: text,
-            footer: '©  𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙',
+            footer: '© JAMESMODZ',
             buttons: [
                 { buttonId: `${prefix}menu general`, buttonText: { displayText: '🏠 GENERAL' }, type: 1 },
                 { buttonId: `${prefix}menu group`, buttonText: { displayText: '👥 GROUP' }, type: 1 },
@@ -126,14 +134,17 @@ async function sendMenu(m, session, category = 'main') {
                 { buttonId: `${prefix}menu tools`, buttonText: { displayText: '🧰 TOOLS' }, type: 1 }
             ],
             headerType: 4
-        });
+        }, { quoted: m.raw });
     } catch (err) {
-        log.error('menu', `buttons failed: ${err.message}`);
-        // Fallback if buttons fail on older WhatsApp versions
+        log.error('menu', `Interactive buttons failed: ${err.message}`);
+        
+        // FALLBACK: If buttons are not supported by your Baileys version/WhatsApp update, send as a numbered text menu
+        const fallbackText = `${text}\n\n*MENU CATEGORIES:*\n1. 🏠 GENERAL\n2. 👥 GROUP\n3. 👑 OWNER\n4. 📥 DOWNLOADS\n5. 🧰 TOOLS\n\n_Reply with the number (e.g., 1) or type ${prefix}menu group_`;
+        
         try {
-            return await m.send({ image: menuImagePayload(configuredImage), caption: text });
+            return await m.send({ image: menuImagePayload(configuredImage), caption: fallbackText });
         } catch (fallbackErr) {
-            return m.reply(text);
+            return m.reply(fallbackText);
         }
     }
 }
@@ -146,17 +157,6 @@ async function getQuotedMessage(m) {
         key: { remoteJid: m.from, id: ctx.stanzaId, participant: ctx.participant },
         message: ctx.quotedMessage,
     };
-}
-
-const DEFAULT_MENU_IMAGE = 'https://files.catbox.moe/6s94uf.jpeg';
-
-function menuImagePayload(value) {
-    if (/^https?:\/\//i.test(value)) return { url: value };
-    try {
-        return fs.readFileSync(value);
-    } catch {
-        return { url: DEFAULT_MENU_IMAGE };
-    }
 }
 
 function parseSwitch(arg) {
@@ -179,13 +179,19 @@ async function handleCommand(m, { args, sock, session }) {
 
     if (!isPublic && !owner) return;
 
+    // Handle Numbered Menu Selection (Fallback)
+    if (['1', '2', '3', '4', '5'].includes(cmd) && !m.isGroup) {
+        const map = { '1': 'general', '2': 'group', '3': 'owner', '4': 'downloads', '5': 'tools' };
+        if (map[cmd]) return sendMenu(m, session, map[cmd], sock);
+    }
+
     if (GROUP_CMDS.has(cmd)) return runGroupCommand(cmd, m, { sock, settings, owner, args, P, getQuotedMessage });
 
     switch (cmd) {
         case 'menu':
         case 'help':
             const category = args[0] ? args[0].toLowerCase() : 'main';
-            return sendMenu(m, session, category);
+            return sendMenu(m, session, category, sock);
 
         case 'ping': {
             const start = Date.now();
@@ -871,7 +877,6 @@ async function handleCommand(m, { args, sock, session }) {
             if (!expr) return m.reply(`Usage: ${P}calc <expression>`);
             if (!/^[\d\s+\-*/().%]+$/.test(expr)) return m.reply('❌ Only numbers and + - * / ( ) % allowed.');
             try {
-                // eslint-disable-next-line no-new-func
                 const val = Function(`"use strict";return (${expr})`)();
                 return m.reply(`🧮 ${expr} = *${val}*`);
             } catch {
