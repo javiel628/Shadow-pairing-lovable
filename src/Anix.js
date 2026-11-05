@@ -984,121 +984,7 @@ case 'donate': {
 _© ${botName(settings, config)}_
 `.trim());
 }
-break;
-
-
-case 'enc':
-case 'encrypt': {
-    const JsConfuser = require('js-confuser');
-
-    const quoted = m.quoted;
-
-    if (!quoted) {
-        return m.reply('❌ Reply to a JavaScript (.js) file.');
-    }
-
-    const fileName = quoted.fileName || quoted.msg?.fileName || '';
-
-    if (!fileName.toLowerCase().endsWith('.js')) {
-        return m.reply('❌ Only .js files are supported.');
-    }
-
-    try {
-        await sock.sendMessage(m.chat, {
-            react: { text: '⏳', key: m.key }
-        });
-
-        const docBuffer = await quoted.download();
-
-        if (!docBuffer) {
-            return m.reply('❌ Failed to download the file.');
-        }
-
-        const result = await JsConfuser.obfuscate(
-            docBuffer.toString('utf-8'),
-            {
-                target: 'node',
-                preset: 'high',
-                compact: true,
-                minify: true,
-                flatten: true,
-
-                identifierGenerator: function () {
-                    const originalString = 'SMILEMODZ';
-                    const randomString = (length) => {
-                        let result = '';
-                        const characters =
-                            'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-
-                        for (let i = 0; i < length; i++) {
-                            result += characters.charAt(
-                                Math.floor(Math.random() * characters.length)
-                            );
-                        }
-
-                        return result;
-                    };
-
-                    return originalString + randomString(2);
-                },
-
-                renameVariables: true,
-                renameGlobals: false,
-                stringEncoding: true,
-                stringSplitting: 0.0,
-                stringConcealing: true,
-                stringCompression: true,
-                duplicateLiteralsRemoval: 1.0,
-                controlFlowFlattening: 1.0,
-                opaquePredicates: 0.9,
-                deadCode: 0.0,
-                dispatcher: true,
-                calculator: true,
-                hexadecimalNumbers: true,
-                movedDeclarations: true,
-                objectExtraction: true,
-                globalConcealing: true
-            }
-        );
-
-        const output = result.code || result;
-
-        await sock.sendMessage(m.chat, {
-            document: Buffer.from(output, 'utf-8'),
-            mimetype: 'application/javascript',
-            fileName: `SHADOW-${fileName}`,
-            caption: `
-╭━━〔 亗 SHADOW MD 亗 〕━━╮
-┃
-┃  🔐 ENCRYPTION SUCCESSFUL
-┃
-┃  📁 File: ${fileName}
-┃  🛡️ Protection: HIGH
-┃
-┃  👨‍💻 DEVELOPER
-┃  𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙
-┃
-╰━━━━━━━━━━━━━━━━━━╯
-            `.trim()
-        }, { quoted: m });
-
-        await sock.sendMessage(m.chat, {
-            react: { text: '✅', key: m.key }
-        });
-
-    } catch (err) {
-        console.error('SHADOW ENCRYPT ERROR:', err);
-        return m.reply(`❌ Encryption failed: ${err.message}`);
-    }
-
-    break;
-}
-
-
-
-        
-        
-        
+break;     
         //─────────────────────────
         case 'antilink': {
             if (!(await requireGroup(m))) return;
@@ -1202,6 +1088,31 @@ case 's': {
     }
 }
 break;
+
+            case 'take':
+case 'steal': {
+    try {
+        const quoted = m.quoted;
+
+        if (!quoted || !quoted.mtype || !quoted.mtype.includes('stickerMessage')) {
+            return m.reply('Reply to a sticker with .take');
+        }
+
+        const media = await quoted.download();
+
+        await sock.sendMessage(m.chat, {
+            sticker: media,
+            packname: 'SHADOW MD',
+            author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙'
+        }, { quoted: m });
+
+    } catch (error) {
+        console.error(error);
+        return m.reply('Failed to take sticker.');
+    }
+}
+break;
+            
      
 
 
