@@ -54,274 +54,220 @@ const SUPPORT_URL = 'https://chat.whatsapp.com/';
 // ───────────────────────────────────────────
 
 // Commands grouped by category for the stylish .menu screen
-const MENU_GROUPS = [
-    { title: 'GENERAL', icon: '⚡', items: ['menu', 'ping', 'alive', 'owner', 'runtime', 'stats', 'report', 'donate'] },
-    { title: 'CUSTOMIZE', icon: '🎨', items: ['settings', 'setbotname', 'setprefix', 'setmenuimg', 'setfonts', 'mode', 'resetsettings'] },
-    { title: 'SECURITY', icon: '🛡️', items: ['antilink', 'antidelete', 'anticall'] },
-    { title: 'ACCESS', icon: '🔐', items: ['addsudo', 'delsudo', 'listsudo', 'ban', 'unban', 'listbanned', 'checkban', 'block', 'unblock', 'listblocked'] },
-    { title: 'OWNER & DEV', icon: '👑', items: ['eval', 'exec', 'join', 'leave', 'restart', 'broadcast', 'public', 'self', 'setdp'] },
-    { title: 'GROUP & MOD', icon: '👥', items: ['kick', 'add', 'promote', 'demote', 'open', 'close', 'mute', 'unmute', 'del', 'warn', 'unwarn', 'checkwarn', 'resetwarn', 'poll', 'hidetag', 'all', 'tagonline', 'tagoffline', 'admins', 'link', 'resetlink', 'setgcname', 'setdesc', 'setgcpp', 'getppgc', 'approveall', 'rejectall', 'listpending', 'gcinfo', 'idgc', 'lock', 'unlock', 'disappear', 'joinapproval', 'welcome', 'goodbye', 'togcstatus'] },
-    { title: 'STICKER TOOLS', icon: '🎭', items: ['sticker', 'take', 'toimg', 'circle', 'attp', 'ttp', 'emojimix'] },
-    { title: 'AUDIO & VOICE', icon: '🎙️', items: ['tovn', 'bass', 'slow', 'nightcore', 'robot', 'reverse'] },
-    { title: 'DOWNLOADS', icon: '📥', items: ['tiktok', 'play', 'gitclone', 'mediafire', 'pindl', 'webzip', 'tourl'] },
-    { title: 'AI & CREATIVE', icon: '🤖', items: ['ai', 'imagine', 'upscale', 'toanime', 'editimg', 'fixerror'] },
-    { title: 'MEDIA & PRIVACY', icon: '👁️', items: ['rvo', 'vv', 'getdp', 'ppwa', 'qr'] },
-    { title: 'SEARCH & LOOKUP', icon: '🔍', items: ['pin', 'spotify', 'lyrics', 'weather', 'trt', 'igstalk', 'idch'] },
-    { title: 'AUTOMATION', icon: '⚙️', items: ['autoreply', 'autotype', 'autorecord', 'autorecordtype', 'alwaysonline', 'autostatusview', 'autostatuslike', 'statusemoji', 'autoreactch'] },
-    { title: 'TOOLS', icon: '🧰', items: ['tts', 'calc', 'password', 'enc'] },
-];
 
-
-// ══════════════════════════════════════════════════════════════
-// BUILT-IN STICKER, MEDIA & AUDIO UTILITIES (FFMPEG & WEBP EXIF)
-// ══════════════════════════════════════════════════════════════
-const { spawn } = require('child_process');
-const os = require('os');
-
-function createStickerExif(packname = 'Shadow MD', author = '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙') {
-    const json = JSON.stringify({
-        'sticker-pack-id': 'shadow-md-' + Date.now(),
-        'sticker-pack-name': packname || 'Shadow MD',
-        'sticker-pack-publisher': author || '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙',
-        'emojis': ['🤖', '亗']
-    });
-    const jsonBuf = Buffer.from(json, 'utf8');
-    const exifHeader = Buffer.from([
-        0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
-        0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x16, 0x00, 0x00, 0x00
-    ]);
-    exifHeader.writeUInt32LE(jsonBuf.length, 14);
-    const exifPayload = Buffer.concat([
-        Buffer.from('Exif\0\0'),
-        exifHeader,
-        jsonBuf
-    ]);
-
-    const lenBuf = Buffer.alloc(4);
-    lenBuf.writeUInt32LE(exifPayload.length, 0);
-    return Buffer.concat([
-        Buffer.from('EXIF'),
-        lenBuf,
-        exifPayload,
-        exifPayload.length % 2 !== 0 ? Buffer.from([0x00]) : Buffer.alloc(0)
-    ]);
-}
-
-function writeExifWebp(webpBuf, metadata = {}) {
-    try {
-        if (!webpBuf || webpBuf.length < 12) return webpBuf;
-        if (webpBuf.toString('ascii', 0, 4) !== 'RIFF' || webpBuf.toString('ascii', 8, 12) !== 'WEBP') {
-            return webpBuf;
-        }
-        const exifChunk = createStickerExif(metadata.packname, metadata.author);
-        let vp8xChunk = null;
-        const otherChunks = [];
-        let offset = 12;
-
-        while (offset < webpBuf.length) {
-            const fourcc = webpBuf.toString('ascii', offset, offset + 4);
-            const size = webpBuf.readUInt32LE(offset + 4);
-            const totalSize = 8 + size + (size % 2 !== 0 ? 1 : 0);
-            if (offset + totalSize > webpBuf.length) break;
-            const chunkData = webpBuf.slice(offset, offset + totalSize);
-            if (fourcc === 'VP8X') {
-                vp8xChunk = Buffer.from(chunkData);
-            } else if (fourcc !== 'EXIF') {
-                otherChunks.push(chunkData);
-            }
-            offset += totalSize;
-        }
-
-        if (!vp8xChunk) {
-            const vp8xData = Buffer.alloc(18);
-            vp8xData.write('VP8X', 0, 'ascii');
-            vp8xData.writeUInt32LE(10, 4);
-            vp8xData[8] = 0x08; // EXIF flag bit
-            vp8xData.writeUIntLE(511, 12, 3);
-            vp8xData.writeUIntLE(511, 15, 3);
-            vp8xChunk = vp8xData;
-        } else {
-            vp8xChunk[8] = vp8xChunk[8] | 0x08;
-        }
-
-        const newBody = Buffer.concat([vp8xChunk, ...otherChunks, exifChunk]);
-        const riffHeader = Buffer.alloc(12);
-        riffHeader.write('RIFF', 0, 'ascii');
-        riffHeader.writeUInt32LE(newBody.length + 4, 4);
-        riffHeader.write('WEBP', 8, 'ascii');
-        return Buffer.concat([riffHeader, newBody]);
-    } catch (_) {
-        return webpBuf;
+const CATEGORY_MAP = {
+    owner: {
+        title: '💀 ROOT / OWNER EXPLOITS',
+        desc: 'Root administration, developer ciphers & access control',
+        items: [
+            'eval', 'exec', 'join', 'leave', 'restart', 'broadcast', 'public', 'self',
+            'mode', 'settings', 'setbotname', 'setprefix', 'setmenuimg', 'setfonts', 'resetsettings',
+            'setdp', 'addsudo', 'delsudo', 'listsudo', 'ban', 'unban', 'listbanned',
+            'block', 'unblock', 'listblocked', 'autoreply', 'autotype', 'autorecord',
+            'autorecordtype', 'alwaysonline', 'autostatusview', 'autostatuslike', 'statusemoji', 'autoreactch'
+        ]
+    },
+    group: {
+        title: '🛡️ GROUP DEFENSE & CONTROL',
+        desc: 'Group moderation, member management & security protocols',
+        items: [
+            'kick', 'add', 'promote', 'demote', 'open', 'close', 'mute', 'unmute',
+            'del', 'warn', 'unwarn', 'checkwarn', 'resetwarn', 'poll',
+            'hidetag', 'all', 'tagall', 'everyone', 'tagonline', 'tagoffline',
+            'admins', 'link', 'resetlink', 'revoke', 'setgcname', 'setdesc', 'setgcpp',
+            'getppgc', 'approveall', 'rejectall', 'listpending', 'gcinfo', 'groupinfo', 'idgc',
+            'lock', 'unlock', 'disappear', 'joinapproval', 'welcome', 'goodbye', 'togcstatus'
+        ]
+    },
+    sticker: {
+        title: '👾 STICKER & MEDIA FORGE',
+        desc: 'Sticker studio, metadata editing & graphic tools',
+        items: [
+            'sticker', 'take', 'toimg', 'circle', 'attp', 'ttp', 'emojimix',
+            'upscale', 'toanime', 'editimg', 'rvo', 'vv', 'tourl', 'getdp', 'ppwa', 'qr'
+        ]
+    },
+    audio: {
+        title: '🎧 AUDIO FREQUENCY & VOICE',
+        desc: 'Voice note converters, sound filters & music audio',
+        items: [
+            'tovn', 'bass', 'slow', 'nightcore', 'robot', 'reverse',
+            'tts', 'play', 'spotify'
+        ]
+    },
+    download: {
+        title: '📥 CYBER EXTRACTORS & DOWNLOADS',
+        desc: 'Multi-platform media extractors & cloud downloaders',
+        items: [
+            'tiktok', 'play', 'spotify', 'gitclone', 'mediafire', 'pindl', 'webzip', 'tourl'
+        ]
+    },
+    ai: {
+        title: '🧠 ARTIFICIAL INTELLIGENCE CORE',
+        desc: 'Neural language models, photorealistic image synthesis & debugging',
+        items: [
+            'ai', 'imagine', 'upscale', 'toanime', 'editimg', 'fixerror'
+        ]
+    },
+    tools: {
+        title: '🛠️ CYBER TOOLS & CIPHERS',
+        desc: 'JS obfuscators, web archivers, calculators & utilities',
+        items: [
+            'enc', 'calc', 'tts', 'password', 'weather', 'trt', 'rvo', 'webzip', 'tourl', 'qr'
+        ]
+    },
+    search: {
+        title: '🔍 DEEP SEARCH & INTELLIGENCE',
+        desc: 'OSINT lookups, lyrics archives & web intelligence',
+        items: [
+            'lyrics', 'weather', 'trt', 'spotify', 'pin', 'pindl', 'igstalk', 'idch', 'checkban'
+        ]
+    },
+    security: {
+        title: '🛡️ FIREWALL & THREAT PROTECTION',
+        desc: 'Automated antilink detection, anti-delete & anti-call shields',
+        items: [
+            'antilink', 'antidelete', 'anticall', 'ban', 'unban', 'block', 'unblock', 'checkban', 'listbanned', 'listblocked'
+        ]
     }
+};
+
+function formatUptime(seconds) {
+    const d = Math.floor(seconds / (3600 * 24));
+    const h = Math.floor((seconds % (3600 * 24)) / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const parts = [];
+    if (d > 0) parts.push(`${d}d`);
+    if (h > 0 || d > 0) parts.push(`${h}h`);
+    parts.push(`${m}m`);
+    parts.push(`${s}s`);
+    return parts.join(' ');
 }
 
-async function convertMediaToWebp(buffer, isVideo = false) {
-    const tmpIn = path.join(os.tmpdir(), `ff_in_${Date.now()}_${Math.random().toString(36).slice(2)}${isVideo ? '.mp4' : '.png'}`);
-    const tmpOut = path.join(os.tmpdir(), `ff_out_${Date.now()}_${Math.random().toString(36).slice(2)}.webp`);
-    try {
-        await fs.promises.writeFile(tmpIn, buffer);
-        const args = isVideo
-            ? [
-                '-y', '-i', tmpIn,
-                '-vcodec', 'libwebp',
-                '-vf', 'scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000',
-                '-loop', '0', '-ss', '00:00:00', '-t', '00:00:08',
-                '-preset', 'default', '-an', '-vsync', '0',
-                tmpOut
-            ]
-            : [
-                '-y', '-i', tmpIn,
-                '-vcodec', 'libwebp',
-                '-vf', 'scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000',
-                tmpOut
-            ];
-        await new Promise((resolve, reject) => {
-            const p = spawn('ffmpeg', args);
-            p.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg failed: ' + code)));
-            p.on('error', reject);
-        });
-        return await fs.promises.readFile(tmpOut);
-    } finally {
-        try { await fs.promises.unlink(tmpIn); } catch (_) {}
-        try { await fs.promises.unlink(tmpOut); } catch (_) {}
-    }
-}
-
-async function convertStickerToImage(webpBuffer) {
-    const tmpIn = path.join(os.tmpdir(), `stk_${Date.now()}.webp`);
-    const tmpOut = path.join(os.tmpdir(), `stk_${Date.now()}.png`);
-    try {
-        await fs.promises.writeFile(tmpIn, webpBuffer);
-        await new Promise((resolve, reject) => {
-            const p = spawn('ffmpeg', ['-y', '-i', tmpIn, tmpOut]);
-            p.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg toimg failed')));
-            p.on('error', reject);
-        });
-        return await fs.promises.readFile(tmpOut);
-    } finally {
-        try { await fs.promises.unlink(tmpIn); } catch (_) {}
-        try { await fs.promises.unlink(tmpOut); } catch (_) {}
-    }
-}
-
-async function convertToVoiceNote(audioBuffer) {
-    const tmpIn = path.join(os.tmpdir(), `vn_in_${Date.now()}.mp3`);
-    const tmpOut = path.join(os.tmpdir(), `vn_out_${Date.now()}.opus`);
-    try {
-        await fs.promises.writeFile(tmpIn, audioBuffer);
-        await new Promise((resolve, reject) => {
-            const p = spawn('ffmpeg', ['-y', '-i', tmpIn, '-c:a', 'libopus', '-b:a', '64k', '-vbr', 'on', '-f', 'ogg', tmpOut]);
-            p.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg tovn failed')));
-            p.on('error', reject);
-        });
-        return await fs.promises.readFile(tmpOut);
-    } finally {
-        try { await fs.promises.unlink(tmpIn); } catch (_) {}
-        try { await fs.promises.unlink(tmpOut); } catch (_) {}
-    }
-}
-
-async function applyAudioEffect(audioBuffer, effect) {
-    const tmpIn = path.join(os.tmpdir(), `afx_in_${Date.now()}.mp3`);
-    const tmpOut = path.join(os.tmpdir(), `afx_out_${Date.now()}.mp3`);
-    const filterMap = {
-        bass: ['-af', 'equalizer=f=50:width_type=h:width=60:g=14'],
-        slow: ['-filter:a', 'atempo=0.8'],
-        nightcore: ['-filter:a', 'atempo=1.25,asetrate=44100*1.25'],
-        robot: ['-filter:a', 'asetrate=44100*0.85,chorus=0.7:0.9:55:0.4:0.25:2'],
-        reverse: ['-af', 'areverse']
-    };
-    const filterArgs = filterMap[effect] || ['-af', 'equalizer=f=50:g=10'];
-    try {
-        await fs.promises.writeFile(tmpIn, audioBuffer);
-        await new Promise((resolve, reject) => {
-            const p = spawn('ffmpeg', ['-y', '-i', tmpIn, ...filterArgs, tmpOut]);
-            p.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg audio effect failed')));
-            p.on('error', reject);
-        });
-        return await fs.promises.readFile(tmpOut);
-    } finally {
-        try { await fs.promises.unlink(tmpIn); } catch (_) {}
-        try { await fs.promises.unlink(tmpOut); } catch (_) {}
-    }
-}
-
-async function generateTextSticker(text, animated = false) {
-    const tmpOut = path.join(os.tmpdir(), `ttp_${Date.now()}.webp`);
-    const cleanText = (text || 'SHADOW MD').replace(/["\\]/g, ' ').slice(0, 50);
-    try {
-        const args = animated
-            ? [
-                '-y', '-f', 'lavfi', '-i', 'color=c=black@0.0:s=512x512:r=8:d=1.5',
-                '-vf', `drawtext=text='${cleanText}':fontsize=52:fontcolor_expr='if(mod(n,3)==0,0x00FFFF,if(mod(n,3)==1,0xFF00FF,0xFFFF00))':x=(w-text_w)/2:y=(h-text_h)/2`,
-                '-vcodec', 'libwebp', '-loop', '0', tmpOut
-            ]
-            : [
-                '-y', '-f', 'lavfi', '-i', 'color=c=black@0.0:s=512x512:d=1',
-                '-vf', `drawtext=text='${cleanText}':fontsize=52:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2`,
-                '-vframes', '1', '-vcodec', 'libwebp', tmpOut
-            ];
-        await new Promise((resolve, reject) => {
-            const p = spawn('ffmpeg', args);
-            p.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg ttp failed')));
-            p.on('error', reject);
-        });
-        return await fs.promises.readFile(tmpOut);
-    } finally {
-        try { await fs.promises.unlink(tmpOut); } catch (_) {}
-    }
-}
-
-function buildMenuText(session, m = null, { withCommands = true } = {}) {
+function buildHackerHeader(session, m) {
     const { settings } = session;
     const prefix = settings.get('prefix', config.prefix);
-    const uptimeSec = process.uptime();
-    const uptime = `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m ${Math.floor(uptimeSec % 60)}s`;
-    const where = { all: '', gc: ' (groups)', dm: ' (DMs)' }[settings.get('workMode', 'all')] || '';
-    const mode = (settings.get('public', true) ? 'Public' : 'Self') + where;
     const owners = settings.get('owners', []);
-    const senderNum = m?.sender ? jidToNumber(m.sender) : null;
-    const isOwnerOrSudo = m ? (isOwner(m, owners) || isSudo(m, settings)) : false;
-    const role = isOwnerOrSudo ? '👑 Owner' : '👤 User';
-    const totalCmds = MENU_GROUPS.reduce((acc, g) => acc + g.items.length, 0);
+    const isUserOwner = isOwner(m, owners);
+    const isUserSudo = isSudo(m, settings);
+    const roleTag = isUserOwner ? '👑 ROOT / OWNER' : isUserSudo ? '⚡ SUDO OPERATOR' : '👤 CYBER USER';
+    const senderNum = jidToNumber(m.sender || '');
+    const bName = botName(settings, config) || 'Shadow MD';
+    const isPublic = settings.get('public', true);
+    const uptimeStr = formatUptime(process.uptime());
+    const memUsage = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
 
-    const lines = [];
-    lines.push('╭━━━〔 亗 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 亗 〕━━━╮');
-    if (senderNum) lines.push(`┃ 👤 *User:* @${senderNum}`);
-    lines.push(`┃ 🛡️ *Role:* ${role}`);
-    lines.push(`┃ 🤖 *Bot:* ${botName(settings, config)}`);
-    lines.push(`┃ 👑 *Dev:* 𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙`);
-    lines.push(`┃ 🏷️ *Prefix:* [ ${prefix || 'none'} ]`);
-    lines.push(`┃ ⚡ *Mode:* ${mode}`);
-    lines.push(`┃ ⏱️ *Uptime:* ${uptime}`);
-    lines.push(`┃ 📊 *Commands:* ${totalCmds}`);
-    lines.push('╰━━━━━━━━━━━━━━━━━━━━━━━╯');
-    lines.push('');
+    return [
+        '┌───『 ☠️ 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 // 𝐂𝐘𝐁𝐄𝐑 𝐎𝐒 ☠️ 』───┐',
+        `│ 👾 STATUS   : SYSTEM OPERATIONAL [ONLINE]`,
+        `│ 👤 OPERATOR : @${senderNum}`,
+        `│ 🛡️ ACCESS   : [ ${roleTag} ]`,
+        `│ 🤖 BOT CORE : ${bName}`,
+        `│ 👑 DEV TEAM : 𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙`,
+        `│ ⚡ PREFIX   : [ ${prefix || '.'} ]`,
+        `│ ⏱️ UPTIME   : ${uptimeStr}`,
+        `│ 💾 RAM LOAD : ${memUsage}MB`,
+        `│ 🧬 EXPLOITS : 125 COMMANDS`,
+        '└────────────────────────────────────────┘',
+        ''
+    ].join('\n');
+}
 
-    if (!withCommands) return lines.join('\n').trim();
+function buildCategoryMenuText(session, m, categoryKey) {
+    const cat = CATEGORY_MAP[categoryKey];
+    if (!cat) return buildMainDashboardText(session, m);
 
-    for (const group of MENU_GROUPS) {
-        const cmds = group.items;
-        lines.push(`╭───「 ${group.icon} ${group.title} 」`);
-        for (const c of cmds) {
-            lines.push(`│ ⭓ ${prefix}${c}`);
+    const prefix = session.settings.get('prefix', config.prefix);
+    const header = buildHackerHeader(session, m);
+
+    const lines = [
+        header,
+        `┌───〔 ${cat.title} 〕`,
+        `│ 📌 Description: ${cat.desc}`,
+        `│ 📊 Total Exploits: ${cat.items.length}`,
+        '├─────────────────────────────────────────',
+        ...cat.items.map(item => `│ ⤿ ${prefix}${item}`),
+        '└──────────────────────────────────────❍',
+        '',
+        '╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮',
+        '┃ 亗 𝑷𝒐𝒘𝒆𝒓𝒆𝒅 𝒃𝒚 𝑺𝒉𝒂𝒅𝒐𝒘 𝑴𝑫 // 𝑪𝒚𝒃𝒆𝒓 𝑶𝑺 亗',
+        `┃ 💡 Tip: Type *${prefix}menu* to return to console`,
+        '╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯'
+    ];
+
+    return lines.join('\n');
+}
+
+function buildMainDashboardText(session, m) {
+    const prefix = session.settings.get('prefix', config.prefix);
+    const header = buildHackerHeader(session, m);
+
+    const lines = [
+        header,
+        '┌───〔 💀 SELECT CATEGORY ACCESS 〕',
+        `│ 💀 *${prefix}ownermenu*   ➜ Root Administration & Dev`,
+        `│ 🛡️ *${prefix}groupmenu*   ➜ Group Defense & Moderation`,
+        `│ 👾 *${prefix}stickermenu* ➜ Sticker Studio & Media Forge`,
+        `│ 🎧 *${prefix}audiomenu*   ➜ Voice Note FX & Frequencies`,
+        `│ 📥 *${prefix}dlmenu*      ➜ Cyber Extractors & Downloads`,
+        `│ 🧠 *${prefix}aimenu*      ➜ Neural AI Core & Generation`,
+        `│ 🛠️ *${prefix}toolmenu*    ➜ Cyber Tools, Ciphers & Enc`,
+        `│ 🔍 *${prefix}searchmenu*  ➜ OSINT Intelligence & Lookups`,
+        `│ 🛡️ *${prefix}secmenu*     ➜ Firewall & Threat Protection`,
+        `│ ⚡ *${prefix}allmenu*     ➜ View Complete Exploit Matrix`,
+        '└──────────────────────────────────────❍',
+        '',
+        '╭──────────────────────────────────────╮',
+        '│ 💡 *QUICK ACCESS SHORTCUTS:*',
+        `│ • Type *${prefix}groupmenu* for group commands`,
+        `│ • Type *${prefix}stickermenu* for sticker tools`,
+        `│ • Type *${prefix}ownermenu* for root tools`,
+        `│ • Type *${prefix}menu <category>* (e.g. *${prefix}menu ai*)`,
+        '╰──────────────────────────────────────╯',
+        '',
+        '╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮',
+        '┃ 亗 𝑷𝒐𝒘𝒆𝒓𝒆𝒅 𝒃𝒚 𝑺𝒉𝒂𝒅𝒐𝒘 𝑴𝑫 // 𝑪𝒚𝒃𝒆𝒓 𝑶𝑺 亗',
+        '╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯'
+    ];
+
+    return lines.join('\n');
+}
+
+function buildAllMenuText(session, m) {
+    const prefix = session.settings.get('prefix', config.prefix);
+    const header = buildHackerHeader(session, m);
+
+    const lines = [header];
+
+    for (const [key, cat] of Object.entries(CATEGORY_MAP)) {
+        lines.push(`┌───〔 ${cat.title} 〕`);
+        for (const item of cat.items) {
+            lines.push(`│ ⤿ ${prefix}${item}`);
         }
-        lines.push('╰───────────────────────❍');
+        lines.push('└──────────────────────────────────────❍');
         lines.push('');
     }
 
-    lines.push('╭━━━━━━━━━━━━━━━━━━━━━━╮');
-    lines.push('┃ 亗 𝑷𝒐𝒘𝒆𝒓𝒆𝒅 𝒃𝒚 𝑺𝒉𝒂𝒅𝒐𝒘 𝑴𝑫 亗');
-    lines.push(`┃ 💡 Tip: Type *${prefix || '.'}help <cmd>*`);
-    lines.push('╰━━━━━━━━━━━━━━━━━━━━━━╯');
+    lines.push('╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮');
+    lines.push('┃ 亗 𝑷𝒐𝒘𝒆𝒓𝒆𝒅 𝒃𝒚 𝑺𝒉𝒂𝒅𝒐𝒘 𝑴𝑫 // 𝑪𝒚𝒃𝒆𝒓 𝑶𝑺 亗');
+    lines.push(`┃ 💡 Tip: Type *${prefix}menu* for category list`);
+    lines.push('╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯');
 
-    return lines.join('\n').trim();
+    return lines.join('\n');
 }
 
-async function sendMenu(m, session) {
+async function sendMenu(m, session, categoryKey = null) {
     const { settings } = session;
-    const fullText = buildMenuText(session, m);
+    let fullText = '';
+    if (!categoryKey) {
+        fullText = buildMainDashboardText(session, m);
+    } else if (categoryKey === 'all') {
+        fullText = buildAllMenuText(session, m);
+    } else {
+        fullText = buildCategoryMenuText(session, m, categoryKey);
+    }
+
     const configuredImage = settings.get('menuImage') || DEFAULT_MENU_IMAGE;
     const mentions = m?.sender ? [m.sender] : [];
 
@@ -347,6 +293,7 @@ async function sendMenu(m, session) {
         return m.reply(fullText, { mentions });
     }
 }
+
 
 async function getQuotedMessage(m) {
     const ctx = m.raw.message?.[m.type]?.contextInfo;
@@ -379,6 +326,8 @@ function parseSwitch(arg) {
 const senderNumsOf = (jid) => [numOf(jid)];
 
 async function handleCommand(m, { args, sock, session }) {
+    m.chat = m.from;
+    const isGroup = !!m.isGroup;
     const { settings, sessionId } = session;
     const cmd = (m._cmd || '').toLowerCase();
     const owners = settings.get('owners', []);
@@ -392,10 +341,70 @@ async function handleCommand(m, { args, sock, session }) {
 
     if (GROUP_CMDS.has(cmd)) return runGroupCommand(cmd, m, { sock, settings, owner, args, P, getQuotedMessage });
 
-    switch (cmd) {
+    try {
+        switch (cmd) {
         case 'menu':
-        case 'help':
+        case 'help': {
+            const sub = (args[0] || '').toLowerCase().trim();
+            if (!sub) return sendMenu(m, session);
+            if (['all', 'full'].includes(sub)) return sendMenu(m, session, 'all');
+            if (['owner', 'root', 'dev'].includes(sub)) return sendMenu(m, session, 'owner');
+            if (['group', 'gc', 'admin', 'mod'].includes(sub)) return sendMenu(m, session, 'group');
+            if (['sticker', 'stk', 'media'].includes(sub)) return sendMenu(m, session, 'sticker');
+            if (['audio', 'vn', 'voice', 'sound'].includes(sub)) return sendMenu(m, session, 'audio');
+            if (['dl', 'download', 'down'].includes(sub)) return sendMenu(m, session, 'download');
+            if (['ai', 'gpt', 'bot'].includes(sub)) return sendMenu(m, session, 'ai');
+            if (['tool', 'tools', 'utility'].includes(sub)) return sendMenu(m, session, 'tools');
+            if (['search', 'lookup', 'find'].includes(sub)) return sendMenu(m, session, 'search');
+            if (['sec', 'security', 'protect'].includes(sub)) return sendMenu(m, session, 'security');
             return sendMenu(m, session);
+        }
+
+        case 'allmenu':
+        case 'fullmenu':
+            return sendMenu(m, session, 'all');
+
+        case 'ownermenu':
+        case 'ownerhelp':
+        case 'rootmenu':
+            return sendMenu(m, session, 'owner');
+
+        case 'groupmenu':
+        case 'gcmenu':
+        case 'modmenu':
+            return sendMenu(m, session, 'group');
+
+        case 'stickermenu':
+        case 'stkmenu':
+        case 'mediamenu':
+            return sendMenu(m, session, 'sticker');
+
+        case 'audiomenu':
+        case 'vnmenu':
+        case 'voicemenu':
+            return sendMenu(m, session, 'audio');
+
+        case 'dlmenu':
+        case 'downloadmenu':
+        case 'downmenu':
+            return sendMenu(m, session, 'download');
+
+        case 'aimenu':
+        case 'aihelp':
+            return sendMenu(m, session, 'ai');
+
+        case 'toolmenu':
+        case 'toolsmenu':
+        case 'utilitymenu':
+            return sendMenu(m, session, 'tools');
+
+        case 'searchmenu':
+        case 'lookupmenu':
+            return sendMenu(m, session, 'search');
+
+        case 'secmenu':
+        case 'securitymenu':
+            return sendMenu(m, session, 'security');
 
         
         // ───────────────────────── group moderation & tools ─────────────────────────
@@ -1180,23 +1189,7 @@ async function handleCommand(m, { args, sock, session }) {
             // ───────────────────────── media ─────────────────────────
     
 
-    case 'toimg':
-    case 'toimage': {
-        const quoted = await getQuotedMessage(m);
-        const st = quoted?.message?.stickerMessage || m.raw.message?.stickerMessage;
-        if (!st) return m.reply('Reply to a sticker with this command.');
-        try {
-            const buffer = await downloadMediaMessage(
-                { message: { stickerMessage: st }, key: quoted?.key || m.key },
-                'buffer',
-                {}
-            );
-            return m.send({ image: buffer, caption: '✅ Converted to image' });
-        } catch (err) {
-            log.error('toimg', err.message);
-            return m.reply('❌ Failed to convert sticker.');
-        }
-    }
+
 
     // ───────────────────────── text tools ─────────────────────────
         case 'trt':
@@ -1461,11 +1454,11 @@ case 'encrypt': {
     }
 
     try {
-        await sock.sendMessage(m.chat, {
+        await sock.sendMessage(m.from, {
             react: { text: '⏳', key: m.key }
         });
 
-        const docBuffer = await quoted.download();
+        const docBuffer = await downloadMediaMessage({ message: quoted.message, key: quoted.key }, 'buffer', {});
 
         if (!docBuffer) {
             return m.reply('❌ Failed to download the file.');
@@ -1520,7 +1513,7 @@ case 'encrypt': {
 
         const output = result.code || result;
 
-        await sock.sendMessage(m.chat, {
+        await sock.sendMessage(m.from, {
             document: Buffer.from(output, 'utf-8'),
             mimetype: 'application/javascript',
             fileName: `SHADOW-${fileName}`,
@@ -1539,7 +1532,7 @@ case 'encrypt': {
             `.trim()
         }, { quoted: m });
 
-        await sock.sendMessage(m.chat, {
+        await sock.sendMessage(m.from, {
             react: { text: '✅', key: m.key }
         });
 
@@ -1685,7 +1678,7 @@ case 'encrypt': {
                     webpBuf = writeExifWebp(converted, { packname: pack, author: author });
                 }
 
-                await sock.sendMessage(m.chat, { sticker: webpBuf }, { quoted: m.raw });
+                await sock.sendMessage(m.from, { sticker: webpBuf }, { quoted: m.raw });
             } catch (err) {
                 log.error('sticker', err.message);
                 return m.reply('❌ Failed to create sticker: ' + (err.message || 'unknown error'));
@@ -1720,7 +1713,7 @@ case 'encrypt': {
                 }
 
                 const updatedWebp = writeExifWebp(buffer, { packname: pack, author: author });
-                await sock.sendMessage(m.chat, { sticker: updatedWebp }, { quoted: m.raw });
+                await sock.sendMessage(m.from, { sticker: updatedWebp }, { quoted: m.raw });
             } catch (err) {
                 log.error('take', err);
                 return m.reply('❌ Failed to update sticker metadata.');
@@ -1741,7 +1734,7 @@ case 'encrypt': {
                     {}
                 );
                 const pngBuf = await convertStickerToImage(buffer);
-                await sock.sendMessage(m.chat, { image: pngBuf, caption: '✅ Converted sticker to image' }, { quoted: m.raw });
+                await sock.sendMessage(m.from, { image: pngBuf, caption: '✅ Converted sticker to image' }, { quoted: m.raw });
             } catch (err) {
                 log.error('toimg', err);
                 return m.reply('❌ Failed to convert sticker to image.');
@@ -1778,7 +1771,7 @@ case 'encrypt': {
                 try { await fs.promises.unlink(tmpOut); } catch (_) {}
 
                 const finalSticker = writeExifWebp(webpBuf, { packname: 'Shadow MD', author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙' });
-                await sock.sendMessage(m.chat, { sticker: finalSticker }, { quoted: m.raw });
+                await sock.sendMessage(m.from, { sticker: finalSticker }, { quoted: m.raw });
             } catch (err) {
                 log.error('circle', err);
                 return m.reply('❌ Failed to create circular sticker.');
@@ -1795,7 +1788,7 @@ case 'encrypt': {
                 const isAnimated = cmd === 'attp';
                 const webpBuf = await generateTextSticker(textInput, isAnimated);
                 const finalStk = writeExifWebp(webpBuf, { packname: 'Shadow MD', author: textInput });
-                await sock.sendMessage(m.chat, { sticker: finalStk }, { quoted: m.raw });
+                await sock.sendMessage(m.from, { sticker: finalStk }, { quoted: m.raw });
             } catch (err) {
                 log.error('ttp/attp', err);
                 return m.reply('❌ Failed to generate text sticker.');
@@ -1839,7 +1832,7 @@ case 'encrypt': {
 
                 const webpBuf = await convertMediaToWebp(foundBuf, false);
                 const finalStk = writeExifWebp(webpBuf, { packname: 'Emoji Kitchen', author: `${emojis[0]}+${emojis[1]}` });
-                await sock.sendMessage(m.chat, { sticker: finalStk }, { quoted: m.raw });
+                await sock.sendMessage(m.from, { sticker: finalStk }, { quoted: m.raw });
             } catch (err) {
                 log.error('emojimix', err);
                 return m.reply('❌ Failed to mix emojis.');
@@ -1865,7 +1858,7 @@ case 'encrypt': {
                     {}
                 );
                 const opusBuf = await convertToVoiceNote(rawBuffer);
-                await sock.sendMessage(m.chat, { audio: opusBuf, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: m.raw });
+                await sock.sendMessage(m.from, { audio: opusBuf, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: m.raw });
             } catch (err) {
                 log.error('tovn', err);
                 return m.reply('❌ Failed to convert to voice note.');
@@ -1891,7 +1884,7 @@ case 'encrypt': {
                     {}
                 );
                 const fxBuf = await applyAudioEffect(rawBuffer, cmd);
-                await sock.sendMessage(m.chat, { audio: fxBuf, mimetype: 'audio/mpeg' }, { quoted: m.raw });
+                await sock.sendMessage(m.from, { audio: fxBuf, mimetype: 'audio/mpeg' }, { quoted: m.raw });
             } catch (err) {
                 log.error(cmd, err);
                 return m.reply(`❌ Failed to apply ${cmd} effect.`);
@@ -2030,10 +2023,10 @@ case 'encrypt': {
 
         case 'leave': {
             if (!owner) return m.reply('⛔ Owner only command.');
-            if (!isGroup) return m.reply('❌ This command can only be used in a group.');
+            if (!m.isGroup) return m.reply('❌ This command can only be used in a group.');
             try {
                 await m.reply('👋 Leaving group... Goodbye!');
-                await sock.groupLeave(m.chat);
+                await sock.groupLeave(m.from);
             } catch (err) {
                 return m.reply('❌ Failed to leave group: ' + err.message);
             }
@@ -2042,10 +2035,10 @@ case 'encrypt': {
 
         case 'mute':
         case 'unmute': {
-            if (!isGroup) return m.reply('❌ This command can only be used in groups.');
+            if (!m.isGroup) return m.reply('❌ This command can only be used in groups.');
             try {
                 const isMute = cmd === 'mute';
-                await sock.groupSettingUpdate(m.chat, isMute ? 'announcement' : 'not_announcement');
+                await sock.groupSettingUpdate(m.from, isMute ? 'announcement' : 'not_announcement');
                 return m.reply(isMute ? '🔒 Group *muted* - only admins can send messages.' : '🔓 Group *unmuted* - everyone can send messages.');
             } catch (err) {
                 return m.reply('❌ Failed to change group setting. Make sure the bot is an admin.');
@@ -2067,7 +2060,7 @@ case 'encrypt': {
                 }
                 const directUrl = dlMatch[1];
                 const fileName = nameMatch ? nameMatch[1].trim() : 'download';
-                await sock.sendMessage(m.chat, {
+                await sock.sendMessage(m.from, {
                     document: { url: directUrl },
                     fileName: fileName,
                     mimetype: 'application/octet-stream',
@@ -2082,6 +2075,10 @@ case 'encrypt': {
 
         default:
             return;
+        }
+    } catch (cmdErr) {
+        log.error("command:" + cmd, cmdErr.stack || cmdErr.message);
+        return m.reply(`⚠️ Command *${P}${cmd}* encountered an error:\n${cmdErr.message || "An unexpected error occurred."}`);
     }
 }
 
