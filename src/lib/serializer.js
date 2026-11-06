@@ -49,7 +49,6 @@ function serializeMessage(sock, msg, sessionSettings) {
     const isGroup = from?.endsWith('@g.us');
     const sender = isGroup ? msg.key.participant : from;
     const fromMe = msg.key.fromMe;
-    // WhatsApp may identify a sender by LID; the phone-number form (when provided) lets owner/sudo/ban checks match either
     const senderAlt = isGroup ? msg.key.participantAlt || msg.key.participantPn : msg.key.remoteJidAlt || msg.key.senderPn;
 
     let body = '';
@@ -58,7 +57,6 @@ function serializeMessage(sock, msg, sessionSettings) {
     else if (type === 'imageMessage') body = msg.message.imageMessage.caption || '';
     else if (type === 'videoMessage') body = msg.message.videoMessage.caption || '';
     else if (type === 'interactiveResponseMessage') {
-        // A tapped row/button from a native-flow menu: the row id IS the command text.
         const resp = msg.message.interactiveResponseMessage;
         try {
             body = JSON.parse(resp.nativeFlowResponseMessage?.paramsJson || '{}').id || '';
@@ -70,6 +68,29 @@ function serializeMessage(sock, msg, sessionSettings) {
     } else if (type === 'buttonsResponseMessage') {
         body = msg.message.buttonsResponseMessage.selectedButtonId || '';
     }
+
+    // Extract quoted context metadata
+    const contextInfo =
+        msg.message?.extendedTextMessage?.contextInfo ||
+        msg.message?.[type]?.contextInfo;
+    const quotedMsg = contextInfo?.quotedMessage || null;
+    const quotedType = quotedMsg ? getContentType(quotedMsg) : null;
+    const quotedDoc = quotedMsg?.documentMessage || quotedMsg?.documentWithCaptionMessage?.message?.documentMessage;
+    const fileName = quotedDoc?.fileName || '';
+
+    const quoted = quotedMsg
+        ? {
+            key: {
+                remoteJid: contextInfo.remoteJid || from,
+                id: contextInfo.stanzaId,
+                participant: contextInfo.participant,
+            },
+            message: quotedMsg,
+            type: quotedType,
+            fileName,
+            msg: quotedMsg[quotedType] || {},
+        }
+        : null;
 
     return {
         raw: msg,
@@ -84,9 +105,16 @@ function serializeMessage(sock, msg, sessionSettings) {
         type,
         body: (body || '').trim(),
         pushName: msg.pushName || 'Unknown',
+        quoted,
+
+        react: (emoji) => {
+            return sock.sendMessage(from, {
+                react: { text: emoji, key: msg.key }
+            });
+        },
 
         reply: (text, opts = {}) => {
-            const styled = applyFont(text, sessionSettings.get('fontStyle'));
+            const styled = applyFont(text, sessionSettings?.get ? sessionSettings.get('fontStyle') : 0);
             const ctx = paymentContext(from);
             return sock.sendMessage(
                 from,
