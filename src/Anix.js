@@ -1607,7 +1607,150 @@ case 'encrypt': {
         
 
         // ───────────────────────── automation 
-        
+                // ───────────────────────── update / git ─────────────────────────
+        case 'update':
+        case 'checkupdate':
+        case 'up':
+        case 'gitpull': {
+            const sub = (args[0] || '').toLowerCase();
+            const REPO_OWNER = 'javiel628';
+            const REPO_NAME = 'Shadow-pairing-lovable';
+            const RAW_ANIX = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/src/Anix.js`;
+
+            // Helper to fetch latest commits from GitHub
+            const fetchCommits = () => {
+                return new Promise((resolve, reject) => {
+                    const https = require('https');
+                    const req = https.get(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/commits?per_page=5`, {
+                        headers: {
+                            'User-Agent': 'Shadow-MD-Bot',
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    }, (res) => {
+                        let data = '';
+                        res.on('data', chunk => data += chunk);
+                        res.on('end', () => {
+                            if (res.statusCode >= 200 && res.statusCode < 300) {
+                                try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+                            } else {
+                                reject(new Error(`Returned HTTP ${res.statusCode}`));
+                            }
+                        });
+                    });
+                    req.on('error', reject);
+                    req.setTimeout(12000, () => { req.destroy(); reject(new Error('Request timed out')); });
+                });
+            };
+
+            // Owner action: pull and apply updates
+            if (['now', 'pull', 'force', 'apply'].includes(sub)) {
+                if (!owner) return m.reply('⛔ Owner only.');
+                await m.reply('⏳ *Checking environment and pulling updates...*');
+
+                const gitDir = path.join(process.cwd(), '.git');
+                const { execSync } = require('child_process');
+
+                if (fs.existsSync(gitDir)) {
+                    // Git repo mode
+                    try {
+                        const out = execSync('git pull origin main', { timeout: 35000, encoding: 'utf-8' });
+                        await m.reply(`✅ *Update successful:*\n\`\`\`${out.trim()}\`\`\`\n\n♻️ *Restarting bot process...*`);
+                        setTimeout(() => process.exit(0), 1500);
+                        return;
+                    } catch (err) {
+                        return m.reply(`❌ *Update failed:*\n${err.message}`);
+                    }
+                } else {
+                    // Panel / ZIP direct file update mode
+                    try {
+                        const https = require('https');
+                        const fetchRaw = (url) => new Promise((resolve, reject) => {
+                            https.get(url, { headers: { 'User-Agent': 'Shadow-MD-Bot' } }, (res) => {
+                                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                                    return https.get(res.headers.location, { headers: { 'User-Agent': 'Shadow-MD-Bot' } }, (r2) => {
+                                        let b = ''; r2.on('data', c => b += c); r2.on('end', () => resolve(b));
+                                    }).on('error', reject);
+                                }
+                                let b = ''; res.on('data', c => b += c); res.on('end', () => resolve(b));
+                            }).on('error', reject);
+                        });
+
+                        const remoteCode = await fetchRaw(RAW_ANIX);
+                        if (!remoteCode || remoteCode.length < 1000) {
+                            return m.reply('❌ Could not download latest update.');
+                        }
+
+                        const targetPath = __filename;
+                        const backupPath = path.join(__dirname, 'Anix.backup.js');
+                        try { fs.copyFileSync(targetPath, backupPath); } catch {}
+                        fs.writeFileSync(targetPath, remoteCode, 'utf-8');
+
+                        await m.reply(
+                            `✅ *Shadow MD updated successfully!*\n\n` +
+                            `📦 Target: \`src/Anix.js\`\n` +
+                            `💾 Backup: \`src/Anix.backup.js\`\n\n` +
+                            `♻️ *Restarting bot process to apply changes...*`
+                        );
+                        setTimeout(() => process.exit(0), 1500);
+                        return;
+                    } catch (err) {
+                        return m.reply(`❌ *Update failed:*\n${err.message}`);
+                    }
+                }
+            }
+
+            // Default: check updates & show latest changelog
+            try {
+                const commits = await fetchCommits();
+                if (!Array.isArray(commits) || !commits.length) {
+                    return m.reply('⚠️ No updates found.');
+                }
+
+                let localSha = 'Panel / ZIP';
+                try {
+                    const { execSync } = require('child_process');
+                    localSha = execSync('git rev-parse HEAD', { timeout: 3000, encoding: 'utf-8' }).trim().slice(0, 7);
+                } catch {}
+
+                const latestSha = commits[0].sha.slice(0, 7);
+                let statusMsg = '🔎 System Status';
+                if (localSha !== 'Panel / ZIP') {
+                    statusMsg = (localSha === latestSha) ? '🟢 Up to Date' : '🟡 Update Available';
+                }
+
+                const lines = [
+                    '┏❐  亗 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 亗  ❐',
+                    '┃⭔ OWNER   : 𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙',
+                    `┃⭔ STATUS  : ${statusMsg}`,
+                    `┃⭔ CURRENT : [ ${localSha} ]`,
+                    `┃⭔ LATEST  : [ ${latestSha} ]`,
+                    '┗❐',
+                    '┏❐  📜 𝐋𝐀𝐓𝐄𝐒𝐓 𝐂𝐇𝐀𝐍𝐆𝐄𝐋𝐎𝐆  ❐'
+                ];
+
+                commits.slice(0, 5).forEach((c, idx) => {
+                    const sha = c.sha.slice(0, 7);
+                    const msg = (c.commit?.message || '').split('\n')[0];
+                    const author = c.commit?.author?.name || c.author?.login || 'Dev';
+                    const dateRaw = c.commit?.author?.date || '';
+                    const date = dateRaw.replace('T', ' ').replace('Z', ' UTC');
+                    lines.push(`┃ ${idx + 1}. [${sha}] ${msg}`);
+                    lines.push(`┃    👤 ${author} • 🕒 ${date}`);
+                });
+
+                lines.push('┗❐');
+
+                if (owner) {
+                    lines.push(`\n⚡ *Update Actions:*\n• *${P}update now*  ➜ Pull & auto-restart`);
+                }
+
+                return m.reply(lines.join('\n'));
+            } catch (err) {
+                log.error('update', err.message);
+                return m.reply(`❌ *Could not check updates:*\n${err.message}`);
+            }
+        }
+
      
         // ─────────────────────────
         // STICKER & METADATA TOOLS
