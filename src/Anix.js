@@ -1623,7 +1623,7 @@ case 'encrypt': {
         // ─────────────────────────
         // STICKER & METADATA TOOLS
         // ─────────────────────────
-        case 'sticker':
+                case 'sticker':
         case 'stiker':
         case 's': {
             try {
@@ -1662,10 +1662,10 @@ case 'encrypt': {
 
                 let webpBuf;
                 if (isStk) {
-                    webpBuf = writeExifWebp(rawBuffer, { packname: pack, author: author });
+                    webpBuf = await writeExifWebp(rawBuffer, { packname: pack, author: author });
                 } else {
                     const converted = await convertMediaToWebp(rawBuffer, isVid);
-                    webpBuf = writeExifWebp(converted, { packname: pack, author: author });
+                    webpBuf = await writeExifWebp(converted, { packname: pack, author: author });
                 }
 
                 await sock.sendMessage(m.from, { sticker: webpBuf }, { quoted: m.raw });
@@ -1702,7 +1702,7 @@ case 'encrypt': {
                     if (parts[1]) author = parts[1].trim();
                 }
 
-                const updatedWebp = writeExifWebp(buffer, { packname: pack, author: author });
+                const updatedWebp = await writeExifWebp(buffer, { packname: pack, author: author });
                 await sock.sendMessage(m.from, { sticker: updatedWebp }, { quoted: m.raw });
             } catch (err) {
                 log.error('take', err);
@@ -1746,21 +1746,9 @@ case 'encrypt': {
                     'buffer',
                     {}
                 );
-                const tmpIn = path.join(os.tmpdir(), `circ_in_${Date.now()}.png`);
-                const tmpOut = path.join(os.tmpdir(), `circ_out_${Date.now()}.webp`);
-                await fs.promises.writeFile(tmpIn, rawBuffer);
 
-                await new Promise((resolve, reject) => {
-                    const filter = 'scale=512:512:flags=lanczos,format=rgba,geq=r=\'r(X,Y)\':a=\'if(gt(hypot(X-256,Y-256),256),0,255)\'';
-                    const p = spawn('ffmpeg', ['-y', '-i', tmpIn, '-vf', filter, '-vcodec', 'libwebp', tmpOut]);
-                    p.on('close', c => c === 0 ? resolve() : reject(new Error('ffmpeg circle failed')));
-                    p.on('error', reject);
-                });
-                const webpBuf = await fs.promises.readFile(tmpOut);
-                try { await fs.promises.unlink(tmpIn); } catch (_) {}
-                try { await fs.promises.unlink(tmpOut); } catch (_) {}
-
-                const finalSticker = writeExifWebp(webpBuf, { packname: 'Shadow MD', author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙' });
+                const webpBuf = await createCircularSticker(rawBuffer);
+                const finalSticker = await writeExifWebp(webpBuf, { packname: 'Shadow MD', author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙' });
                 await sock.sendMessage(m.from, { sticker: finalSticker }, { quoted: m.raw });
             } catch (err) {
                 log.error('circle', err);
@@ -1777,7 +1765,7 @@ case 'encrypt': {
                 await m.reply('⏳ Generating sticker...');
                 const isAnimated = cmd === 'attp';
                 const webpBuf = await generateTextSticker(textInput, isAnimated);
-                const finalStk = writeExifWebp(webpBuf, { packname: 'Shadow MD', author: textInput });
+                const finalStk = await writeExifWebp(webpBuf, { packname: 'Shadow MD', author: textInput });
                 await sock.sendMessage(m.from, { sticker: finalStk }, { quoted: m.raw });
             } catch (err) {
                 log.error('ttp/attp', err);
@@ -1791,12 +1779,11 @@ case 'encrypt': {
             if (!textInput) return m.reply('Usage: .emojimix 😀+😂 (or .emojimix 😀 ❤️)');
             try {
                 await m.reply('⏳ Mixing emojis...');
-                const emojis = [...textInput.matchAll(/\p{Emoji}/gu)].map(x => x[0]);
-                if (emojis.length < 2) {
+                const pair = parseEmojiPair(textInput);
+                if (!pair) {
                     return m.reply('❌ Please provide at least 2 emojis to mix (e.g. .emojimix 😀+❤️)');
                 }
-                const e1 = emojis[0].codePointAt(0).toString(16);
-                const e2 = emojis[1].codePointAt(0).toString(16);
+                const { e1, e2 } = pair;
 
                 const dates = ['20201001', '20210521', '20210831', '20211115', '20220203', '20220406', '20220815', '20220823', '20221101', '20230126', '20230301', '20230418'];
                 let foundBuf = null;
@@ -1821,7 +1808,7 @@ case 'encrypt': {
                 }
 
                 const webpBuf = await convertMediaToWebp(foundBuf, false);
-                const finalStk = writeExifWebp(webpBuf, { packname: 'Emoji Kitchen', author: `${emojis[0]}+${emojis[1]}` });
+                const finalStk = await writeExifWebp(webpBuf, { packname: 'Emoji Kitchen', author: `${pair.emoji1}+${pair.emoji2}` });
                 await sock.sendMessage(m.from, { sticker: finalStk }, { quoted: m.raw });
             } catch (err) {
                 log.error('emojimix', err);
@@ -1829,6 +1816,9 @@ case 'encrypt': {
             }
             break;
         }
+
+                
+                                
 
         // ─────────────────────────
         // AUDIO & VOICE CONVERSIONS
