@@ -40,6 +40,17 @@ const { handleStatus } = require('./lib/status');
 const { followChannel, handleChannelPost } = require('./lib/channel');
 const { postGroupStatus } = require('./lib/groupstatus');
 const author = '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙';
+const {
+    convertMediaToWebp,
+    writeExifWebp,
+    convertStickerToImage,
+    createCircularSticker,
+    generateTextSticker,
+    convertToVoiceNote,
+    applyAudioEffect
+} = require('./lib/media');
+const { parseEmojiPair } = require('./lib/emoji-kitchen');
+
 
 // ──────────────── EDIT HERE ────────────────
 // Your WhatsApp channel. Put the channel LINK (https://whatsapp.com/channel/XXXX) or, if you know it,
