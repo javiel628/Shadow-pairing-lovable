@@ -145,32 +145,39 @@ function formatUptime(seconds) {
     return parts.join(' ');
 }
 
-function buildHackerHeader(session, m) {
+function buildHackerHeader(session, m, categoryTitle = null, cmdCount = null) {
     const { settings } = session;
-    const prefix = settings.get('prefix', config.prefix);
-    const owners = settings.get('owners', []);
-    const isUserOwner = isOwner(m, owners);
-    const isUserSudo = isSudo(m, settings);
-    const roleTag = isUserOwner ? '👑 ROOT / OWNER' : isUserSudo ? '⚡ SUDO OPERATOR' : '👤 CYBER USER';
+    const prefix = settings.get('prefix', config.prefix) || '.';
     const senderNum = jidToNumber(m.sender || '');
-    const bName = botName(settings, config) || 'Shadow MD';
+    const bName = botName(settings, config) || '亗 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 亗';
     const isPublic = settings.get('public', true);
     const uptimeStr = formatUptime(process.uptime());
     const memUsage = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
 
+    if (categoryTitle) {
+        return [
+            '┏❐  亗 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 亗  ❐',
+            '┃⭔ OWNER :  𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙',
+            `┃⭔ CATEGORY : ${categoryTitle}`,
+            `┃⭔ USER : @${senderNum}`,
+            `┃⭔ PREFIX : [ ${prefix} ]`,
+            `┃⭔ COMMANDS : ${cmdCount || 0}`,
+            `┃⭔ UPTIME : ${uptimeStr}`,
+            `┃⭔ MODE : ${isPublic ? 'PUBLIC' : 'PRIVATE'}`,
+            '┗❐'
+        ].join('\n');
+    }
+
     return [
-        '┌───『 ☠️ 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 // 𝐂𝐘𝐁𝐄𝐑 𝐎𝐒 ☠️ 』───┐',
-        `│ 👾 STATUS   : SYSTEM OPERATIONAL [ONLINE]`,
-        `│ 👤 OPERATOR : @${senderNum}`,
-        `│ 🛡️ ACCESS   : [ ${roleTag} ]`,
-        `│ 🤖 BOT CORE : ${bName}`,
-        `│ 👑 DEV TEAM : 𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙`,
-        `│ ⚡ PREFIX   : [ ${prefix || '.'} ]`,
-        `│ ⏱️ UPTIME   : ${uptimeStr}`,
-        `│ 💾 RAM LOAD : ${memUsage}MB`,
-        `│ 🧬 EXPLOITS : 125 COMMANDS`,
-        '└────────────────────────────────────────┘',
-        ''
+        '┏❐  亗 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 亗  ❐',
+        '┃⭔ OWNER :  𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙',
+        `┃⭔ USER : @${senderNum}`,
+        `┃⭔ BOT : ${bName}`,
+        `┃⭔ PREFIX : [ ${prefix} ]`,
+        `┃⭔ MODE : ${isPublic ? 'PUBLIC' : 'PRIVATE'}`,
+        `┃⭔ UPTIME : ${uptimeStr}`,
+        `┃⭔ RAM : ${memUsage}MB`,
+        '┗❐'
     ].join('\n');
 }
 
@@ -178,83 +185,55 @@ function buildCategoryMenuText(session, m, categoryKey) {
     const cat = CATEGORY_MAP[categoryKey];
     if (!cat) return buildMainDashboardText(session, m);
 
-    const prefix = session.settings.get('prefix', config.prefix);
-    const header = buildHackerHeader(session, m);
+    const prefix = session.settings.get('prefix', config.prefix) || '.';
+    const header = buildHackerHeader(session, m, cat.title, cat.items.length);
 
     const lines = [
         header,
-        `┌───〔 ${cat.title} 〕`,
-        `│ 📌 Description: ${cat.desc}`,
-        `│ 📊 Total Exploits: ${cat.items.length}`,
-        '├─────────────────────────────────────────',
-        ...cat.items.map(item => `│ ⤿ ${prefix}${item}`),
-        '└──────────────────────────────────────❍',
-        '',
-        '╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮',
-        '┃ 亗 𝑷𝒐𝒘𝒆𝒓𝒆𝒅 𝒃𝒚 𝑺𝒉𝒂𝒅𝒐𝒘 𝑴𝑫 // 𝑪𝒚𝒃𝒆𝒓 𝑶𝑺 亗',
-        `┃ 💡 Tip: Type *${prefix}menu* to return to console`,
-        '╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯'
+        ...cat.items.map(item => `❐${prefix}${item}`)
     ];
 
     return lines.join('\n');
 }
 
 function buildMainDashboardText(session, m) {
-    const prefix = session.settings.get('prefix', config.prefix);
+    const prefix = session.settings.get('prefix', config.prefix) || '.';
     const header = buildHackerHeader(session, m);
 
     const lines = [
         header,
-        '┌───〔 💀 SELECT CATEGORY ACCESS 〕',
-        `│ 💀 *${prefix}ownermenu*   ➜ Root Administration & Dev`,
-        `│ 🛡️ *${prefix}groupmenu*   ➜ Group Defense & Moderation`,
-        `│ 👾 *${prefix}stickermenu* ➜ Sticker Studio & Media Forge`,
-        `│ 🎧 *${prefix}audiomenu*   ➜ Voice Note FX & Frequencies`,
-        `│ 📥 *${prefix}dlmenu*      ➜ Cyber Extractors & Downloads`,
-        `│ 🧠 *${prefix}aimenu*      ➜ Neural AI Core & Generation`,
-        `│ 🛠️ *${prefix}toolmenu*    ➜ Cyber Tools, Ciphers & Enc`,
-        `│ 🔍 *${prefix}searchmenu*  ➜ OSINT Intelligence & Lookups`,
-        `│ 🛡️ *${prefix}secmenu*     ➜ Firewall & Threat Protection`,
-        `│ ⚡ *${prefix}allmenu*     ➜ View Complete Exploit Matrix`,
-        '└──────────────────────────────────────❍',
-        '',
-        '╭──────────────────────────────────────╮',
-        '│ 💡 *QUICK ACCESS SHORTCUTS:*',
-        `│ • Type *${prefix}groupmenu* for group commands`,
-        `│ • Type *${prefix}stickermenu* for sticker tools`,
-        `│ • Type *${prefix}ownermenu* for root tools`,
-        `│ • Type *${prefix}menu <category>* (e.g. *${prefix}menu ai*)`,
-        '╰──────────────────────────────────────╯',
-        '',
-        '╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮',
-        '┃ 亗 𝑷𝒐𝒘𝒆𝒓𝒆𝒅 𝒃𝒚 𝑺𝒉𝒂𝒅𝒐𝒘 𝑴𝑫 // 𝑪𝒚𝒃𝒆𝒓 𝑶𝑺 亗',
-        '╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯'
+        `❐${prefix}ownermenu`,
+        `❐${prefix}groupmenu`,
+        `❐${prefix}stickermenu`,
+        `❐${prefix}audiomenu`,
+        `❐${prefix}dlmenu`,
+        `❐${prefix}aimenu`,
+        `❐${prefix}toolmenu`,
+        `❐${prefix}searchmenu`,
+        `❐${prefix}secmenu`,
+        `❐${prefix}allmenu`
     ];
 
     return lines.join('\n');
 }
 
 function buildAllMenuText(session, m) {
-    const prefix = session.settings.get('prefix', config.prefix);
-    const header = buildHackerHeader(session, m);
+    const prefix = session.settings.get('prefix', config.prefix) || '.';
+    const totalCmds = Object.values(CATEGORY_MAP).reduce((sum, c) => sum + c.items.length, 0);
+    const header = buildHackerHeader(session, m, 'ALL COMMANDS', totalCmds);
 
-    const lines = [header];
+    const lines = [header, ''];
 
     for (const [key, cat] of Object.entries(CATEGORY_MAP)) {
-        lines.push(`┌───〔 ${cat.title} 〕`);
+        lines.push(`┏❐  ${cat.title}  ❐`);
         for (const item of cat.items) {
-            lines.push(`│ ⤿ ${prefix}${item}`);
+            lines.push(`❐${prefix}${item}`);
         }
-        lines.push('└──────────────────────────────────────❍');
+        lines.push('┗❐');
         lines.push('');
     }
 
-    lines.push('╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮');
-    lines.push('┃ 亗 𝑷𝒐𝒘𝒆𝒓𝒆𝒅 𝒃𝒚 𝑺𝒉𝒂𝒅𝒐𝒘 𝑴𝑫 // 𝑪𝒚𝒃𝒆𝒓 𝑶𝑺 亗');
-    lines.push(`┃ 💡 Tip: Type *${prefix}menu* for category list`);
-    lines.push('╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯');
-
-    return lines.join('\n');
+    return lines.join('\n').trim();
 }
 
 async function sendMenu(m, session, categoryKey = null) {
