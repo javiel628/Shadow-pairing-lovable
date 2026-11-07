@@ -1623,7 +1623,7 @@ case 'encrypt': {
         // ─────────────────────────
         // STICKER & METADATA TOOLS
         // ─────────────────────────
-                case 'sticker':
+                       case 'sticker':
         case 'stiker':
         case 's': {
             try {
@@ -1652,6 +1652,7 @@ case 'encrypt': {
                 );
 
                 const metaRaw = args.join(' ').trim();
+                let pack = 'Shadow MD';
                 let author = '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙';
                 if (metaRaw) {
                     const parts = metaRaw.includes('|') ? metaRaw.split('|') : metaRaw.split(',');
@@ -1661,10 +1662,10 @@ case 'encrypt': {
 
                 let webpBuf;
                 if (isStk) {
-                    webpBuf = await writeExifWebp(rawBuffer, { author: author });
+                    webpBuf = await writeExifWebp(rawBuffer, { packname: pack, author: author });
                 } else {
                     const converted = await convertMediaToWebp(rawBuffer, isVid);
-                    webpBuf = await writeExifWebp(converted, {author: author });
+                    webpBuf = await writeExifWebp(converted, { packname: pack, author: author });
                 }
 
                 await sock.sendMessage(m.from, { sticker: webpBuf }, { quoted: m.raw });
@@ -1682,7 +1683,7 @@ case 'encrypt': {
                 const quoted = await getQuotedMessage(m);
                 const sticker = quoted?.message?.stickerMessage;
                 if (!sticker) {
-                    return m.reply('❌ Reply to a sticker with .take ');
+                    return m.reply('❌ Reply to a sticker with .take [packname|author]');
                 }
 
                 await m.reply('⏳ Updating sticker metadata...');
@@ -1693,9 +1694,15 @@ case 'encrypt': {
                 );
 
                 const metaRaw = args.join(' ').trim();
+                let pack = 'Shadow MD';
                 let author = '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙';
-                
-                const updatedWebp = await writeExifWebp(buffer, { author: author });
+                if (metaRaw) {
+                    const parts = metaRaw.includes('|') ? metaRaw.split('|') : metaRaw.split(',');
+                    if (parts[0]) pack = parts[0].trim();
+                    if (parts[1]) author = parts[1].trim();
+                }
+
+                const updatedWebp = await writeExifWebp(buffer, { packname: pack, author: author });
                 await sock.sendMessage(m.from, { sticker: updatedWebp }, { quoted: m.raw });
             } catch (err) {
                 log.error('take', err);
@@ -1741,7 +1748,7 @@ case 'encrypt': {
                 );
 
                 const webpBuf = await createCircularSticker(rawBuffer);
-                const finalSticker = await writeExifWebp(webpBuf, {  author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙' });
+                const finalSticker = await writeExifWebp(webpBuf, { packname: 'Shadow MD', author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙' });
                 await sock.sendMessage(m.from, { sticker: finalSticker }, { quoted: m.raw });
             } catch (err) {
                 log.error('circle', err);
@@ -1758,7 +1765,7 @@ case 'encrypt': {
                 await m.reply('⏳ Generating sticker...');
                 const isAnimated = cmd === 'attp';
                 const webpBuf = await generateTextSticker(textInput, isAnimated);
-                const finalStk = await writeExifWebp(webpBuf, { author: textInput });
+                const finalStk = await writeExifWebp(webpBuf, { packname: 'Shadow MD', author: textInput });
                 await sock.sendMessage(m.from, { sticker: finalStk }, { quoted: m.raw });
             } catch (err) {
                 log.error('ttp/attp', err);
@@ -1809,6 +1816,9 @@ case 'encrypt': {
             }
             break;
         }
+ 
+        
+         
 
                 
                                 
