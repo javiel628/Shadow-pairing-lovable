@@ -1595,7 +1595,70 @@ case 'encrypt': {
         }
         
         
-        
+                case 'antidelete':
+        case 'antidel': {
+            if (!owner) return m.reply('⛔ Owner only.');
+
+            const action = (args[0] || '').toLowerCase();
+            const modeArg = (args[1] || '').toLowerCase();
+
+            const current = settings.get('antidelete', {
+                enabled: false,
+                mode: 'chat'
+            });
+
+            if (!action || action === 'status') {
+                return m.reply(
+                    `亗 *SHADOW MD ANTI-DELETE* 亗\n\n` +
+                    `• Status: ${current.enabled ? '✅ ON' : '❌ OFF'}\n` +
+                    `• Mode: ${current.mode === 'dm' ? 'Owner DM' : 'Same Chat'}\n\n` +
+                    `*Available Commands:*\n` +
+                    `▢ ${P}antidelete on\n` +
+                    `▢ ${P}antidelete on chat\n` +
+                    `▢ ${P}antidelete on dm\n` +
+                    `▢ ${P}antidelete off\n\n` +
+                    `© SHADOW MD`
+                );
+            }
+
+            if (action === 'on' || action === 'chat' || action === 'dm') {
+                const mode = action === 'dm' || modeArg === 'dm'
+                    ? 'dm'
+                    : 'chat';
+
+                settings.set('antidelete', {
+                    enabled: true,
+                    mode
+                });
+
+                return m.reply(
+                    `✅ *ANTI-DELETE ACTIVATED*\n\n` +
+                    `• Status: ON\n` +
+                    `• Mode: ${mode === 'dm' ? 'Owner Private DM' : 'Same Chat'}\n\n` +
+                    `${mode === 'dm'
+                        ? 'Deleted messages will be sent to the bot owner.'
+                        : 'Deleted messages will be restored in their original chat.'}\n\n` +
+                    `亗 *SHADOW MD* 亗`
+                );
+            }
+
+            if (action === 'off') {
+                settings.set('antidelete', {
+                    enabled: false,
+                    mode: current.mode || 'chat'
+                });
+
+                return m.reply('❌ *ANTI-DELETE DEACTIVATED*');
+            }
+
+            return m.reply(
+                `❌ Invalid option.\n\n` +
+                `Use:\n` +
+                `${P}antidelete on\n` +
+                `${P}antidelete on dm\n` +
+                `${P}antidelete off`
+            );
+        }
         
         
         
