@@ -1652,7 +1652,6 @@ case 'encrypt': {
                 );
 
                 const metaRaw = args.join(' ').trim();
-                let pack = 'Shadow MD';
                 let author = '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙';
                 if (metaRaw) {
                     const parts = metaRaw.includes('|') ? metaRaw.split('|') : metaRaw.split(',');
@@ -1694,7 +1693,6 @@ case 'encrypt': {
                 );
 
                 const metaRaw = args.join(' ').trim();
-                let pack = 'Shadow MD';
                 let author = '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙';
                 if (metaRaw) {
                     const parts = metaRaw.includes('|') ? metaRaw.split('|') : metaRaw.split(',');
