@@ -1,149 +1,374 @@
-/*
-╔══════════════════════════╗
-║             𓆩 BASE TELE X WA 𓆪   
-║                                      
-║             ⚡ DEVELOPER CREDITS ⚡      
-║                                   
-║          ᴅᴇᴠᴇʟᴏᴘᴇʀ : ᴊᴀᴍᴇsᴍᴏᴅᴢ  
-║          ᴛᴇᴀᴍ      : james Inc 
 
-║  ⚠️  C R E D I T   N O T I C E  ⚠️ 
+'use strict';
 
-║  Do NOT remove or modify these credits
-║  without permission from the original dev
-║  Respect the work. Give credit where it's
-║  due. Don't steal another developer's work.
-║  TELEGRAM : t.me/shenxidev 
-║  © 2026 JAMESMODZ — ALL RIGHTS RESERVED 
-╚════════════════════════╝
-*/
 const { downloadMediaMessage } = require('./baileys');
 const log = require('./logger');
 const { numOf, pnOf } = require('./access');
 
-/**
- * Anti-delete: remembers recent messages (and their media, because WhatsApp removes the file when a
- * message is deleted for everyone) and re-sends them when someone deletes.
- *   mode 'chat' -> re-sent in the same chat      mode 'dm' -> forwarded to the owner's DM
- * Memory is bounded: 1500 messages / 60 MB of media / 3 hours.
- */
-const caches = new Map(); // sessionId -> { map, bytes }
+const caches = new Map();
+
 const MAX_ENTRIES = 1500;
 const MAX_MEDIA_BYTES = 60 * 1024 * 1024;
 const MAX_ONE_MEDIA = 15 * 1024 * 1024;
-const TTL = 3 * 3600 * 1000;
-const MEDIA_KINDS = { imageMessage: 'image', videoMessage: 'video', audioMessage: 'audio', stickerMessage: 'sticker', documentMessage: 'document' };
-const SKIP_KINDS = new Set(['protocolMessage', 'reactionMessage', 'senderKeyDistributionMessage', 'messageContextInfo', 'pollUpdateMessage']);
+const TTL = 3 * 60 * 60 * 1000;
 
-const cacheOf = (id) => {
-    if (!caches.has(id)) caches.set(id, { map: new Map(), bytes: 0 });
-    return caches.get(id);
+const MEDIA_KINDS = {
+    imageMessage: 'image',
+    videoMessage: 'video',
+    audioMessage: 'audio',
+    stickerMessage: 'sticker',
+    documentMessage: 'document'
 };
 
-function drop(c, key) {
-    const e = c.map.get(key);
-    if (e?.media) c.bytes -= e.media.buffer.length;
-    c.map.delete(key);
+const SKIP_KINDS = new Set([
+    'protocolMessage',
+    'reactionMessage',
+    'senderKeyDistributionMessage',
+    'messageContextInfo',
+    'pollUpdateMessage'
+]);
+
+// Unwrap WhatsApp message containers.
+function unwrapContent(message) {
+    let content = message;
+    let depth = 0;
+
+    while (content && depth++ < 6) {
+        if (content.ephemeralMessage?.message) {
+            content = content.ephemeralMessage.message;
+            continue;
+        }
+
+        if (content.viewOnceMessage?.message) {
+            content = content.viewOnceMessage.message;
+            continue;
+        }
+
+        if (content.viewOnceMessageV2?.message) {
+            content = content.viewOnceMessageV2.message;
+            continue;
+        }
+
+        if (content.viewOnceMessageV2Extension?.message) {
+            content = content.viewOnceMessageV2Extension.message;
+            continue;
+        }
+
+        if (content.documentWithCaptionMessage?.message) {
+            content = content.documentWithCaptionMessage.message;
+            continue;
+        }
+
+        break;
+    }
+
+    return content || {};
 }
 
-function evict(c) {
+function cacheOf(id) {
+    if (!caches.has(id)) {
+        caches.set(id, { map: new Map(), bytes: 0 });
+    }
+    return caches.get(id);
+}
+
+function drop(cache, key) {
+    const entry = cache.map.get(key);
+
+    if (entry?.media?.buffer) {
+        cache.bytes -= entry.media.buffer.length;
+    }
+
+    cache.map.delete(key);
+}
+
+function evict(cache) {
     const now = Date.now();
-    for (const [key, e] of c.map) {
-        if (c.map.size <= MAX_ENTRIES && c.bytes <= MAX_MEDIA_BYTES && now - e.at < TTL) break; // oldest first
-        drop(c, key);
+
+    for (const [key, entry] of cache.map) {
+        const expired = now - entry.at >= TTL;
+
+        if (
+            cache.map.size <= MAX_ENTRIES &&
+            cache.bytes <= MAX_MEDIA_BYTES &&
+            !expired
+        ) {
+            break;
+        }
+
+        drop(cache, key);
     }
 }
 
-const kindOf = (message) => Object.keys(message || {}).find((k) => !SKIP_KINDS.has(k));
+function kindOf(message) {
+    const content = unwrapContent(message);
+
+    return Object.keys(content).find(
+        key => !SKIP_KINDS.has(key)
+    );
+}
 
 function textOf(message) {
+    const content = unwrapContent(message);
+
     return (
-        message?.conversation ||
-        message?.extendedTextMessage?.text ||
-        message?.imageMessage?.caption ||
-        message?.videoMessage?.caption ||
-        message?.documentMessage?.caption ||
+        content.conversation ||
+        content.extendedTextMessage?.text ||
+        content.imageMessage?.caption ||
+        content.videoMessage?.caption ||
+        content.documentMessage?.caption ||
+        content.documentWithCaptionMessage?.message?.documentMessage?.caption ||
         ''
     );
 }
 
 async function rememberMessage(sock, sessionId, raw, settings) {
-    if (!settings.get('antidelete', {}).enabled) return;
-    const jid = raw.key?.remoteJid || '';
-    if (raw.key.fromMe || !raw.message || jid === 'status@broadcast' || jid.endsWith('@newsletter')) return;
-    const kind = kindOf(raw.message);
-    if (!kind) return;
+    try {
+        const config = settings.get('antidelete', {});
 
-    const c = cacheOf(sessionId);
-    const entry = { raw, kind, at: Date.now() };
-    const node = raw.message[kind];
-    if (MEDIA_KINDS[kind] && Number(node?.fileLength || 0) < MAX_ONE_MEDIA) {
-        try {
-            const buffer = await downloadMediaMessage(raw, 'buffer', {});
-            entry.media = { type: MEDIA_KINDS[kind], buffer, mimetype: node.mimetype, fileName: node.fileName, caption: node.caption || '', ptt: !!node.ptt, gif: !!node.gifPlayback };
-            c.bytes += buffer.length;
-        } catch (err) {
-            log.warn('antidelete', `could not save media: ${err.message}`);
+        if (!config.enabled) return;
+
+        const jid = raw.key?.remoteJid;
+        const id = raw.key?.id;
+
+        if (
+            !jid ||
+            !id ||
+            raw.key?.fromMe ||
+            !raw.message ||
+            jid === 'status@broadcast' ||
+            jid.endsWith('@newsletter')
+        ) {
+            return;
         }
+
+        const content = unwrapContent(raw.message);
+        const kind = kindOf(raw.message);
+
+        if (!kind) return;
+
+        const cache = cacheOf(sessionId);
+        const key = `${jid}:${id}`;
+
+        // Avoid duplicate entries.
+        if (cache.map.has(key)) return;
+
+        const entry = {
+            raw,
+            content,
+            kind,
+            at: Date.now()
+        };
+
+        const node = content[kind];
+
+        if (
+            MEDIA_KINDS[kind] &&
+            Number(node?.fileLength || 0) <= MAX_ONE_MEDIA
+        ) {
+            try {
+                const buffer = await downloadMediaMessage(
+                    raw,
+                    'buffer',
+                    {}
+                );
+
+                if (Buffer.isBuffer(buffer) &&
+                    buffer.length <= MAX_ONE_MEDIA) {
+
+                    entry.media = {
+                        type: MEDIA_KINDS[kind],
+                        buffer,
+                        mimetype: node?.mimetype,
+                        fileName: node?.fileName,
+                        caption: node?.caption || '',
+                        ptt: !!node?.ptt,
+                        gif: !!node?.gifPlayback
+                    };
+
+                    cache.bytes += buffer.length;
+                }
+            } catch (err) {
+                log.warn(
+                    'antidelete',
+                    `Media backup failed: ${err.message}`
+                );
+            }
+        }
+
+        cache.map.set(key, entry);
+        evict(cache);
+
+    } catch (err) {
+        log.warn('antidelete', `Remember error: ${err.message}`);
     }
-    c.map.set(`${jid}:${raw.key.id}`, entry);
-    evict(c);
 }
 
 function ownerJid(sock, settings) {
-    const first = (settings.get('owners', []) || []).find((j) => String(j).endsWith('@s.whatsapp.net'));
-    return first || `${numOf(sock.user?.id)}@s.whatsapp.net`;
+    const owners = settings.get('owners', []) || [];
+
+    const owner = owners.find(
+        jid => String(jid).endsWith('@s.whatsapp.net')
+    );
+
+    if (owner) return owner;
+
+    const ownNumber = numOf(sock.user?.id);
+
+    return ownNumber
+        ? `${ownNumber}@s.whatsapp.net`
+        : null;
 }
 
-/** Returns true when `raw` is a delete-for-everyone notice (handled or ignored). */
 async function handleRevoke(sock, sessionId, raw, settings) {
-    const pm = raw.message?.protocolMessage;
-    if (!pm || !(pm.type === 0 || pm.type === 'REVOKE')) return false;
-
-    const cfg = settings.get('antidelete', {});
-    if (!cfg.enabled || raw.key.fromMe || !pm.key?.id) return true;
-
-    const chat = pm.key.remoteJid || raw.key.remoteJid;
-    const c = cacheOf(sessionId);
-    const entry = c.map.get(`${chat}:${pm.key.id}`);
-    if (!entry) return true;
-    drop(c, `${chat}:${pm.key.id}`);
-
-    const target = cfg.mode === 'dm' ? ownerJid(sock, settings) : chat;
-    const author = entry.raw.key.participant || entry.raw.key.remoteJid;
-    let where = 'Private chat';
-    if (chat.endsWith('@g.us')) {
-        try {
-            where = (await sock.groupMetadata(chat)).subject || 'Group';
-        } catch {
-            where = 'Group';
-        }
-    }
-    const authorPn = await pnOf(sock, entry.raw.key.participantAlt || author);
-    const header = `🗑️ *Anti-Delete*\n👤 @${numOf(authorPn)}\n💬 ${where}\n🕒 ${new Date(entry.at).toLocaleTimeString()}`;
-    const mentions = [authorPn];
-    const text = textOf(entry.raw.message);
-
     try {
-        const mdl = entry.media;
-        if (!mdl) {
-            const body = text || `[${entry.kind.replace('Message', '')}]`;
-            await sock.sendMessage(target, { text: `${header}\n\n${body}`, mentions });
-        } else if (mdl.type === 'image') {
-            await sock.sendMessage(target, { image: mdl.buffer, caption: `${header}${text ? `\n\n${text}` : ''}`, mentions });
-        } else if (mdl.type === 'video') {
-            await sock.sendMessage(target, { video: mdl.buffer, caption: `${header}${text ? `\n\n${text}` : ''}`, gifPlayback: mdl.gif, mentions });
-        } else if (mdl.type === 'document') {
-            await sock.sendMessage(target, { document: mdl.buffer, mimetype: mdl.mimetype, fileName: mdl.fileName || 'file', caption: header, mentions });
-        } else {
-            // audio / sticker cannot carry a caption: send the media, then the details
-            await sock.sendMessage(target, mdl.type === 'audio' ? { audio: mdl.buffer, mimetype: mdl.mimetype || 'audio/mp4', ptt: mdl.ptt } : { sticker: mdl.buffer });
-            await sock.sendMessage(target, { text: header, mentions });
+        const pm = raw.message?.protocolMessage;
+
+        if (
+            !pm ||
+            !(pm.type === 0 || pm.type === 'REVOKE')
+        ) {
+            return false;
         }
+
+        const config = settings.get('antidelete', {});
+
+        if (!config.enabled || raw.key?.fromMe || !pm.key?.id) {
+            return true;
+        }
+
+        const chat = pm.key.remoteJid || raw.key.remoteJid;
+
+        if (!chat) return true;
+
+        const cache = cacheOf(sessionId);
+        const key = `${chat}:${pm.key.id}`;
+        const entry = cache.map.get(key);
+
+        if (!entry) {
+            log.warn(
+                'antidelete',
+                `Deleted message not found in cache: ${pm.key.id}`
+            );
+            return true;
+        }
+
+        drop(cache, key);
+
+        let target;
+
+        if (config.mode === 'dm') {
+            target = ownerJid(sock, settings);
+        } else {
+            target = chat;
+        }
+
+        if (!target) {
+            log.warn('antidelete', 'Could not determine destination');
+            return true;
+        }
+
+        const author =
+            entry.raw.key?.participant ||
+            entry.raw.key?.remoteJid ||
+            '';
+
+        const authorPn = await pnOf(
+            sock,
+            entry.raw.key?.participantAlt || author
+        ).catch(() => author);
+
+        let where = chat.endsWith('@g.us')
+            ? 'Group'
+            : 'Private chat';
+
+        if (chat.endsWith('@g.us')) {
+            try {
+                const metadata = await sock.groupMetadata(chat);
+                where = metadata.subject || 'Group';
+            } catch {}
+        }
+
+        const validMention =
+            typeof authorPn === 'string' &&
+            authorPn.endsWith('@s.whatsapp.net');
+
+        const mentions = validMention ? [authorPn] : [];
+
+        const header =
+            `🗑️ *SHADOW MD ANTI-DELETE*\n` +
+            `👤 Sender: ${validMention ? '@' + numOf(authorPn) : numOf(author)}\n` +
+            `💬 Chat: ${where}\n` +
+            `🕒 Time: ${new Date(entry.at).toLocaleTimeString()}`;
+
+        const text = textOf(entry.content);
+        const media = entry.media;
+
+        if (!media) {
+            await sock.sendMessage(target, {
+                text: `${header}\n\n${text || `[${entry.kind.replace('Message', '')}]`}`,
+                mentions
+            });
+
+            return true;
+        }
+
+        if (media.type === 'image') {
+            await sock.sendMessage(target, {
+                image: media.buffer,
+                caption: `${header}${text ? '\n\n' + text : ''}`,
+                mentions
+            });
+        } else if (media.type === 'video') {
+            await sock.sendMessage(target, {
+                video: media.buffer,
+                caption: `${header}${text ? '\n\n' + text : ''}`,
+                gifPlayback: media.gif,
+                mentions
+            });
+        } else if (media.type === 'document') {
+            await sock.sendMessage(target, {
+                document: media.buffer,
+                mimetype: media.mimetype || 'application/octet-stream',
+                fileName: media.fileName || 'deleted-file',
+                caption: header,
+                mentions
+            });
+        } else if (media.type === 'audio') {
+            await sock.sendMessage(target, {
+                audio: media.buffer,
+                mimetype: media.mimetype || 'audio/mp4',
+                ptt: media.ptt
+            });
+
+            await sock.sendMessage(target, {
+                text: header,
+                mentions
+            });
+        } else if (media.type === 'sticker') {
+            await sock.sendMessage(target, {
+                sticker: media.buffer
+            });
+
+            await sock.sendMessage(target, {
+                text: header,
+                mentions
+            });
+        }
+
+        return true;
+
     } catch (err) {
-        log.warn('antidelete', `could not resend: ${err.message}`);
+        log.warn(
+            'antidelete',
+            `Revoke handler error: ${err.message}`
+        );
+
+        return true;
     }
-    return true;
 }
 
-module.exports = { rememberMessage, handleRevoke };
+module.exports = {
+    rememberMessage,
+    handleRevoke
+};
