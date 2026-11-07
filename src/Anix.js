@@ -132,6 +132,19 @@ const CATEGORY_MAP = {
     }
 };
 
+
+async function handleMessageRevocation(client, revocationMessage) {
+
+
+
+
+
+
+
+
+
+
+
 function formatUptime(seconds) {
     const d = Math.floor(seconds / (3600 * 24));
     const h = Math.floor((seconds % (3600 * 24)) / 3600);
@@ -1573,18 +1586,7 @@ case 'encrypt': {
             );
         }
 
-        case 'antidelete': {
-            if (!owner) return m.reply('⛔ Owner only.');
-            const a = (args[0] || '').toLowerCase();
-            const cfg = { enabled: false, mode: 'chat', ...settings.get('antidelete', {}) };
-            if (a === 'on') cfg.enabled = true;
-            else if (a === 'off') cfg.enabled = false;
-            else if (a === 'chat') Object.assign(cfg, { enabled: true, mode: 'chat' });
-            else if (a === 'dm') Object.assign(cfg, { enabled: true, mode: 'dm' });
-            else return m.reply(`*Anti-delete*: ${cfg.enabled ? `ON (${cfg.mode === 'dm' ? "sent to owner's DM" : 'shown in the same chat'})` : 'OFF'}\n\n${P}antidelete on | off\n${P}antidelete chat — re-send deleted messages in the same chat\n${P}antidelete dm — forward them to the owner's DM`);
-            settings.set('antidelete', cfg);
-            return m.reply(cfg.enabled ? `✅ Anti-delete *ON* — deleted messages ${cfg.mode === 'dm' ? "are forwarded to the owner's DM" : 'are re-sent in the same chat'}.` : '✅ Anti-delete *OFF*.');
-        }
+        
 
         case 'anticall': {
             if (!owner) return m.reply('⛔ Owner only.');
@@ -1594,7 +1596,33 @@ case 'encrypt': {
             return m.reply(a === 'off' ? '✅ Anti-call *OFF*.' : `✅ Anti-call *${a.toUpperCase()}* — ${a === 'hang' ? 'calls are rejected' : 'callers are rejected and blocked'} (owner and sudo are never affected).`);
         }
         
-        
+        case "antidel":
+case "antidelete": {
+    if (!Owner) throw NotOwner;
+
+    // No argument → show current status
+    if (!text || !['on', 'off', 'true', 'false', '1', '0'].includes(text.toLowerCase())) {
+        return reply(
+            `░亗 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 𝐀𝐍𝐓𝐈𝐃𝐄𝐋𝐄𝐓𝐄 亗░\n\n` +
+            ` 𝗦𝘁𝗮𝘁𝘂𝘀: ${antidelState ? '✅ 𝗢𝗡' : '❌ 𝗢𝗙𝗙'}\n\n` +
+            ` 𝗨𝘀𝗮𝗴𝗲: ${prefix + command} on | off`
+        );
+    }
+
+    const arg0 = text.toLowerCase();
+    const enable = ['on', 'true', '1'].includes(arg0);
+
+    antidelState = enable;
+
+    await reply(
+        `░亗 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 𝐀𝐍𝐓𝐈𝐃𝐄𝐋𝐄𝐓𝐄 亗░\n\n` +
+        ` 𝗔𝗻𝘁𝗶𝗱𝗲𝗹𝗲𝘁𝗲 𝗶𝘀 𝗻𝗼𝘄 ${enable ? '✅ 𝗘𝗡𝗔𝗕𝗟𝗘𝗗' : '❌ 𝗗𝗜𝗦𝗔𝗕𝗟𝗘𝗗'}.\n\n` +
+        ` ${enable
+            ? '𝗥𝗮𝘃𝗲𝗻 𝘄𝗶𝗹𝗹 𝗰𝗮𝗰𝗵𝗲 𝗶𝗻𝗰𝗼𝗺𝗶𝗻𝗴 𝗺𝗲𝘀𝘀𝗮𝗴𝗲𝘀 𝗮𝗻𝗱 𝗿𝗲𝗽𝗼𝗿𝘁 𝗱𝗲𝗹𝗲𝘁𝗶𝗼𝗻𝘀 𝘁𝗼 𝘆𝗼𝘂𝗿 𝗶𝗻𝗯𝗼𝘅.'
+            : '𝗥𝗮𝘃𝗲𝗻 𝘄𝗶𝗹𝗹 𝘀𝘁𝗼𝗽 𝘁𝗿𝗮𝗰𝗸𝗶𝗻𝗴 𝗱𝗲𝗹𝗲𝘁𝗶𝗼𝗻𝘀.'}`
+    );
+}
+break;
         
         
         
