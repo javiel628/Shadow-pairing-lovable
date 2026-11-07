@@ -1596,36 +1596,49 @@ case 'encrypt': {
             return m.reply(a === 'off' ? '✅ Anti-call *OFF*.' : `✅ Anti-call *${a.toUpperCase()}* — ${a === 'hang' ? 'calls are rejected' : 'callers are rejected and blocked'} (owner and sudo are never affected).`);
         }
         
-        case "antidel":
-case "antidelete": {
-    if (!Owner) throw NotOwner;
+        
+        
+        
+       case 'antidelete':
+case 'antidel': {
+    if (!owner) return m.reply('⛔ Owner only.');
 
-    // No argument → show current status
-    if (!text || !['on', 'off', 'true', 'false', '1', '0'].includes(text.toLowerCase())) {
-        return reply(
-            `░亗 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 𝐀𝐍𝐓𝐈𝐃𝐄𝐋𝐄𝐓𝐄 亗░\n\n` +
-            ` 𝗦𝘁𝗮𝘁𝘂𝘀: ${antidelState ? '✅ 𝗢𝗡' : '❌ 𝗢𝗙𝗙'}\n\n` +
-            ` 𝗨𝘀𝗮𝗴𝗲: ${prefix + command} on | off`
+    const current = settings.get('antidelete', { enabled: false, mode: 'chat' });
+    const arg = (args[0] || '').toLowerCase();
+    const sub = (args[1] || '').toLowerCase();
+
+    // mode: chat = post the deleted message back into the chat where it happened
+    //       dm   = send it to the owner's DM instead
+    if (arg === 'mode') {
+        if (!['chat', 'dm'].includes(sub)) {
+            return m.reply(`Current mode: *${current.mode || 'chat'}*\nUsage: ${P}antidelete mode chat|dm`);
+        }
+        settings.set('antidelete', { ...current, mode: sub });
+        return m.reply(`✅ Antidelete mode set to *${sub === 'dm' ? 'owner DM' : 'same chat'}*.`);
+    }
+
+    // toggle on/off, or show status when no valid arg
+    let enable = null;
+    if (['on', 'true', 'yes', 'enable', '1'].includes(arg)) enable = true;
+    else if (['off', 'false', 'no', 'disable', '0'].includes(arg)) enable = false;
+
+    if (enable === null) {
+        return m.reply(
+            `🛡️ *Anti-delete status*\n` +
+            `• Status: *${current.enabled ? '✅ ON' : '❌ OFF'}*\n` +
+            `• Mode: *${current.mode === 'dm' ? 'owner DM' : 'same chat'}*\n\n` +
+            `Usage:\n` +
+            `${P}antidelete on | off\n` +
+            `${P}antidelete mode chat | dm`
         );
     }
 
-    const arg0 = text.toLowerCase();
-    const enable = ['on', 'true', '1'].includes(arg0);
-
-    antidelState = enable;
-
-    await reply(
-        `░亗 𝐒𝐇𝐀𝐃𝐎𝐖 𝐌𝐃 𝐀𝐍𝐓𝐈𝐃𝐄𝐋𝐄𝐓𝐄 亗░\n\n` +
-        ` 𝗔𝗻𝘁𝗶𝗱𝗲𝗹𝗲𝘁𝗲 𝗶𝘀 𝗻𝗼𝘄 ${enable ? '✅ 𝗘𝗡𝗔𝗕𝗟𝗘𝗗' : '❌ 𝗗𝗜𝗦𝗔𝗕𝗟𝗘𝗗'}.\n\n` +
-        ` ${enable
-            ? '𝗥𝗮𝘃𝗲𝗻 𝘄𝗶𝗹𝗹 𝗰𝗮𝗰𝗵𝗲 𝗶𝗻𝗰𝗼𝗺𝗶𝗻𝗴 𝗺𝗲𝘀𝘀𝗮𝗴𝗲𝘀 𝗮𝗻𝗱 𝗿𝗲𝗽𝗼𝗿𝘁 𝗱𝗲𝗹𝗲𝘁𝗶𝗼𝗻𝘀 𝘁𝗼 𝘆𝗼𝘂𝗿 𝗶𝗻𝗯𝗼𝘅.'
-            : '𝗥𝗮𝘃𝗲𝗻 𝘄𝗶𝗹𝗹 𝘀𝘁𝗼𝗽 𝘁𝗿𝗮𝗰𝗸𝗶𝗻𝗴 𝗱𝗲𝗹𝗲𝘁𝗶𝗼𝗻𝘀.'}`
+    settings.set('antidelete', { ...current, enabled: enable });
+    return m.reply(
+        `✅ Anti-delete is now *${enable ? 'ON' : 'OFF'}*` +
+        (enable ? ` (mode: ${current.mode === 'dm' ? 'owner DM' : 'same chat'}).` : '.')
     );
-}
-break;
-        
-        
-        
+} 
         
         
         
