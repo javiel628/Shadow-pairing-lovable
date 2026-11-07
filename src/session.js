@@ -28,6 +28,7 @@ const {
 const pino = require('pino');
 const config = require('./config');
 const { handleMessages, onSessionOpen, handleCalls, handleGroupUpdate, handlePresence } = require('./Anix');
+const { handleRevoke } = require('./lib/antidelete');
 const { createSessionSettings } = require('./lib/settings');
 const log = require('./lib/logger');
 
@@ -343,7 +344,33 @@ async function startSession(sessionId, opts = {}) {
 
     sock.ev.on('messages.upsert', (upsert) => {
         if (entry.stopping || entry.wiped) return;
-        handleMessages(sock, upsert, { sessionId, settings });
+        Promise.resolve(handleMessages(sock, upsert, { sessionId, settings })).catch((e) =>
+            log.warn(tag, `message handler failed: ${e.message}`)
+        );
+    });
+
+    // Some Baileys builds deliver revoke protocol messages through messages.update
+    // instead of messages.upsert. Pass those notices directly to the anti-delete handler.
+    sock.ev.on('messages.update', (updates) => {
+        if (entry.stopping || entry.wiped || !Array.isArray(updates)) return;
+
+        for (const item of updates) {
+            const updateMessage = item?.update?.message || item?.message;
+            if (!item?.key || !updateMessage) continue;
+
+            const protocol = updateMessage.protocolMessage;
+            if (!protocol || !(protocol.type === 0 || protocol.type === 'REVOKE')) continue;
+
+            const revokeNotice = {
+                key: item.key,
+                message: updateMessage,
+                messageTimestamp: item.update?.messageTimestamp || item.messageTimestamp,
+            };
+
+            Promise.resolve(handleRevoke(sock, sessionId, revokeNotice, settings)).catch((e) =>
+                log.warn(tag, `anti-delete update failed: ${e.message}`)
+            );
+        }
     });
 
     return sock;
