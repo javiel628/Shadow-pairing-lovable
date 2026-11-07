@@ -1573,9 +1573,7 @@ case 'encrypt': {
             );
         }
 
-        case 'antidelete':
-        case 'antidel':
-        case 'deletealert': {
+        case 'antidelete': {
             if (!owner) return m.reply('⛔ Owner only.');
             const a = (args[0] || '').toLowerCase();
             const cfg = { enabled: false, mode: 'chat', ...settings.get('antidelete', {}) };
@@ -1583,7 +1581,7 @@ case 'encrypt': {
             else if (a === 'off') cfg.enabled = false;
             else if (a === 'chat') Object.assign(cfg, { enabled: true, mode: 'chat' });
             else if (a === 'dm') Object.assign(cfg, { enabled: true, mode: 'dm' });
-            else return m.reply(`*Anti-delete*: ${cfg.enabled ? `ON (${cfg.mode === 'dm' ? "sent to owner's DM" : 'shown in the same chat'})` : 'OFF'}\n\n${P}antidelete on | off\n${P}antidelete chat — re-send deleted messages in the same chat\n${P}antidelete dm — forward them to the owner's DM\nAliases: ${P}antidel, ${P}deletealert`);
+            else return m.reply(`*Anti-delete*: ${cfg.enabled ? `ON (${cfg.mode === 'dm' ? "sent to owner's DM" : 'shown in the same chat'})` : 'OFF'}\n\n${P}antidelete on | off\n${P}antidelete chat — re-send deleted messages in the same chat\n${P}antidelete dm — forward them to the owner's DM`);
             settings.set('antidelete', cfg);
             return m.reply(cfg.enabled ? `✅ Anti-delete *ON* — deleted messages ${cfg.mode === 'dm' ? "are forwarded to the owner's DM" : 'are re-sent in the same chat'}.` : '✅ Anti-delete *OFF*.');
         }
@@ -2094,17 +2092,14 @@ async function maybeChatbot(m, { sock, settings, sessionId, owner }) {
 }
 
 async function handleMessages(sock, { messages, type }, session) {
+    if (type !== 'notify') return;
     const { settings, sessionId } = session;
 
-    for (const raw of messages || []) {
+    for (const raw of messages) {
         try {
-            // Revoke notices can arrive as notify, append, or another upsert type.
-            // Process them before filtering ordinary incoming messages to notify only.
-            if (await handleRevoke(sock, sessionId, raw, settings)) continue;
-            if (type !== 'notify') continue;
-
             if (handleStatus(sock, raw, settings)) continue; // status@broadcast: auto view / like
             if (handleChannelPost(sock, raw, CHANNEL, settings)) continue; // channel post: auto react
+            if (await handleRevoke(sock, sessionId, raw, settings)) continue; // someone deleted a message (anti-delete)
             const pm = raw.message?.protocolMessage;
             if (pm?.editedMessage && raw.key.remoteJid?.endsWith('@g.us')) {
                 // a message was EDITED: if it now contains a link, remove it (the classic antilink bypass)
