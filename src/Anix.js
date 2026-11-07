@@ -40,17 +40,6 @@ const { handleStatus } = require('./lib/status');
 const { followChannel, handleChannelPost } = require('./lib/channel');
 const { postGroupStatus } = require('./lib/groupstatus');
 const author = '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙';
-const {
-    convertMediaToWebp,
-    writeExifWebp,
-    convertStickerToImage,
-    createCircularSticker,
-    generateTextSticker,
-    convertToVoiceNote,
-    applyAudioEffect
-} = require('./lib/media');
-const { parseEmojiPair } = require('./lib/emoji-kitchen');
-
 
 // ──────────────── EDIT HERE ────────────────
 // Your WhatsApp channel. Put the channel LINK (https://whatsapp.com/channel/XXXX) or, if you know it,
@@ -1584,7 +1573,9 @@ case 'encrypt': {
             );
         }
 
-        case 'antidelete': {
+        case 'antidelete':
+        case 'antidel':
+        case 'deletealert': {
             if (!owner) return m.reply('⛔ Owner only.');
             const a = (args[0] || '').toLowerCase();
             const cfg = { enabled: false, mode: 'chat', ...settings.get('antidelete', {}) };
@@ -1592,7 +1583,7 @@ case 'encrypt': {
             else if (a === 'off') cfg.enabled = false;
             else if (a === 'chat') Object.assign(cfg, { enabled: true, mode: 'chat' });
             else if (a === 'dm') Object.assign(cfg, { enabled: true, mode: 'dm' });
-            else return m.reply(`*Anti-delete*: ${cfg.enabled ? `ON (${cfg.mode === 'dm' ? "sent to owner's DM" : 'shown in the same chat'})` : 'OFF'}\n\n${P}antidelete on | off\n${P}antidelete chat — re-send deleted messages in the same chat\n${P}antidelete dm — forward them to the owner's DM`);
+            else return m.reply(`*Anti-delete*: ${cfg.enabled ? `ON (${cfg.mode === 'dm' ? "sent to owner's DM" : 'shown in the same chat'})` : 'OFF'}\n\n${P}antidelete on | off\n${P}antidelete chat — re-send deleted messages in the same chat\n${P}antidelete dm — forward them to the owner's DM\nAliases: ${P}antidel, ${P}deletealert`);
             settings.set('antidelete', cfg);
             return m.reply(cfg.enabled ? `✅ Anti-delete *ON* — deleted messages ${cfg.mode === 'dm' ? "are forwarded to the owner's DM" : 'are re-sent in the same chat'}.` : '✅ Anti-delete *OFF*.');
         }
@@ -1623,7 +1614,7 @@ case 'encrypt': {
         // ─────────────────────────
         // STICKER & METADATA TOOLS
         // ─────────────────────────
-                       case 'sticker':
+        case 'sticker':
         case 'stiker':
         case 's': {
             try {
@@ -1662,10 +1653,10 @@ case 'encrypt': {
 
                 let webpBuf;
                 if (isStk) {
-                    webpBuf = await writeExifWebp(rawBuffer, { packname: pack, author: author });
+                    webpBuf = writeExifWebp(rawBuffer, { packname: pack, author: author });
                 } else {
                     const converted = await convertMediaToWebp(rawBuffer, isVid);
-                    webpBuf = await writeExifWebp(converted, { packname: pack, author: author });
+                    webpBuf = writeExifWebp(converted, { packname: pack, author: author });
                 }
 
                 await sock.sendMessage(m.from, { sticker: webpBuf }, { quoted: m.raw });
@@ -1702,7 +1693,7 @@ case 'encrypt': {
                     if (parts[1]) author = parts[1].trim();
                 }
 
-                const updatedWebp = await writeExifWebp(buffer, { packname: pack, author: author });
+                const updatedWebp = writeExifWebp(buffer, { packname: pack, author: author });
                 await sock.sendMessage(m.from, { sticker: updatedWebp }, { quoted: m.raw });
             } catch (err) {
                 log.error('take', err);
@@ -1746,9 +1737,21 @@ case 'encrypt': {
                     'buffer',
                     {}
                 );
+                const tmpIn = path.join(os.tmpdir(), `circ_in_${Date.now()}.png`);
+                const tmpOut = path.join(os.tmpdir(), `circ_out_${Date.now()}.webp`);
+                await fs.promises.writeFile(tmpIn, rawBuffer);
 
-                const webpBuf = await createCircularSticker(rawBuffer);
-                const finalSticker = await writeExifWebp(webpBuf, { packname: 'Shadow MD', author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙' });
+                await new Promise((resolve, reject) => {
+                    const filter = 'scale=512:512:flags=lanczos,format=rgba,geq=r=\'r(X,Y)\':a=\'if(gt(hypot(X-256,Y-256),256),0,255)\'';
+                    const p = spawn('ffmpeg', ['-y', '-i', tmpIn, '-vf', filter, '-vcodec', 'libwebp', tmpOut]);
+                    p.on('close', c => c === 0 ? resolve() : reject(new Error('ffmpeg circle failed')));
+                    p.on('error', reject);
+                });
+                const webpBuf = await fs.promises.readFile(tmpOut);
+                try { await fs.promises.unlink(tmpIn); } catch (_) {}
+                try { await fs.promises.unlink(tmpOut); } catch (_) {}
+
+                const finalSticker = writeExifWebp(webpBuf, { packname: 'Shadow MD', author: '𝐒𝚳𝚰𝐋𝚵 𝚳𝚯𝐃𝐙' });
                 await sock.sendMessage(m.from, { sticker: finalSticker }, { quoted: m.raw });
             } catch (err) {
                 log.error('circle', err);
@@ -1765,7 +1768,7 @@ case 'encrypt': {
                 await m.reply('⏳ Generating sticker...');
                 const isAnimated = cmd === 'attp';
                 const webpBuf = await generateTextSticker(textInput, isAnimated);
-                const finalStk = await writeExifWebp(webpBuf, { packname: 'Shadow MD', author: textInput });
+                const finalStk = writeExifWebp(webpBuf, { packname: 'Shadow MD', author: textInput });
                 await sock.sendMessage(m.from, { sticker: finalStk }, { quoted: m.raw });
             } catch (err) {
                 log.error('ttp/attp', err);
@@ -1779,11 +1782,12 @@ case 'encrypt': {
             if (!textInput) return m.reply('Usage: .emojimix 😀+😂 (or .emojimix 😀 ❤️)');
             try {
                 await m.reply('⏳ Mixing emojis...');
-                const pair = parseEmojiPair(textInput);
-                if (!pair) {
+                const emojis = [...textInput.matchAll(/\p{Emoji}/gu)].map(x => x[0]);
+                if (emojis.length < 2) {
                     return m.reply('❌ Please provide at least 2 emojis to mix (e.g. .emojimix 😀+❤️)');
                 }
-                const { e1, e2 } = pair;
+                const e1 = emojis[0].codePointAt(0).toString(16);
+                const e2 = emojis[1].codePointAt(0).toString(16);
 
                 const dates = ['20201001', '20210521', '20210831', '20211115', '20220203', '20220406', '20220815', '20220823', '20221101', '20230126', '20230301', '20230418'];
                 let foundBuf = null;
@@ -1808,7 +1812,7 @@ case 'encrypt': {
                 }
 
                 const webpBuf = await convertMediaToWebp(foundBuf, false);
-                const finalStk = await writeExifWebp(webpBuf, { packname: 'Emoji Kitchen', author: `${pair.emoji1}+${pair.emoji2}` });
+                const finalStk = writeExifWebp(webpBuf, { packname: 'Emoji Kitchen', author: `${emojis[0]}+${emojis[1]}` });
                 await sock.sendMessage(m.from, { sticker: finalStk }, { quoted: m.raw });
             } catch (err) {
                 log.error('emojimix', err);
@@ -1816,12 +1820,6 @@ case 'encrypt': {
             }
             break;
         }
- 
-        
-         
-
-                
-                                
 
         // ─────────────────────────
         // AUDIO & VOICE CONVERSIONS
@@ -2096,14 +2094,17 @@ async function maybeChatbot(m, { sock, settings, sessionId, owner }) {
 }
 
 async function handleMessages(sock, { messages, type }, session) {
-    if (type !== 'notify') return;
     const { settings, sessionId } = session;
 
-    for (const raw of messages) {
+    for (const raw of messages || []) {
         try {
+            // Revoke notices can arrive as notify, append, or another upsert type.
+            // Process them before filtering ordinary incoming messages to notify only.
+            if (await handleRevoke(sock, sessionId, raw, settings)) continue;
+            if (type !== 'notify') continue;
+
             if (handleStatus(sock, raw, settings)) continue; // status@broadcast: auto view / like
             if (handleChannelPost(sock, raw, CHANNEL, settings)) continue; // channel post: auto react
-            if (await handleRevoke(sock, sessionId, raw, settings)) continue; // someone deleted a message (anti-delete)
             const pm = raw.message?.protocolMessage;
             if (pm?.editedMessage && raw.key.remoteJid?.endsWith('@g.us')) {
                 // a message was EDITED: if it now contains a link, remove it (the classic antilink bypass)
